@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+tools/probe/captures/
+tools/probe/debug*.log
+tools/probe/resposta*.txt
+tools/probe/alvo.txt
+.spec/verification/*.json

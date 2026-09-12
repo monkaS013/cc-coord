@@ -1,0 +1,117 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Python314/python.exe C:/Users/ViniciusMoraisHDT/dev/cc-coord/tools/probe/capture.py SessionStart"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Python314/python.exe C:/Users/ViniciusMoraisHDT/dev/cc-coord/tools/probe/capture.py UserPromptSubmit"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Edit|Write|Read|Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Python314/python.exe C:/Users/ViniciusMoraisHDT/dev/cc-coord/tools/probe/capture.py PreToolUse"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Edit|Write|Read|Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Python314/python.exe C:/Users/ViniciusMoraisHDT/dev/cc-coord/tools/probe/capture.py PostToolUse"
+          }
+        ]
+      }
+    ],
+    "PostToolBatch": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Python314/python.exe C:/Users/ViniciusMoraisHDT/dev/cc-coord/tools/probe/capture.py PostToolBatch"
+          }
+        ]
+      }
+    ],
+    "FileChanged": [
+      {
+        "matcher": "alvo.txt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Python314/python.exe C:/Users/ViniciusMoraisHDT/dev/cc-coord/tools/probe/capture.py FileChanged"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Python314/python.exe C:/Users/ViniciusMoraisHDT/dev/cc-coord/tools/probe/capture.py Stop"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Python314/python.exe C:/Users/ViniciusMoraisHDT/dev/cc-coord/tools/probe/capture.py SessionEnd"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Python314/python.exe C:/Users/ViniciusMoraisHDT/dev/cc-coord/tools/probe/capture.py Notification"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Python314/python.exe C:/Users/ViniciusMoraisHDT/dev/cc-coord/tools/probe/capture.py SubagentStart"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Python314/python.exe C:/Users/ViniciusMoraisHDT/dev/cc-coord/tools/probe/capture.py SubagentStop"
+          }
+        ]
+      }
+    ]
+  }
+}

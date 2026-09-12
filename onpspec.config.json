@@ -1,0 +1,16 @@
+{
+  "testCommand": "C:/Python314/python.exe tests/run_tap.py",
+  "reporter": "tap",
+  "testGlobs": [
+    "tests/**"
+  ],
+  "srcGlobs": [
+    "src/**",
+    "hooks/**"
+  ],
+  "ignoreGlobs": [
+    "tools/probe/**",
+    "**/__pycache__/**",
+    "**/*.pyc"
+  ]
+}
