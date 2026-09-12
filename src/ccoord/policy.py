@@ -206,7 +206,12 @@ def _allow(resource: Resource, dono: Optional[str] = None) -> Decision:
 # ---------------------------------------------------------------------------
 
 
-def _decidir_kill(resource: Resource, owner: Optional[Claim], me: Optional[Session]) -> Decision:
+def _decidir_kill(
+    resource: Resource,
+    owner: Optional[Claim],
+    me: Optional[Session],
+    pedido_pelo_usuario: bool = False,
+) -> Decision:
     if owner is None:
         return _allow(resource, None)
 
@@ -214,6 +219,25 @@ def _decidir_kill(resource: Resource, owner: Optional[Claim], me: Optional[Sessi
         return _allow(resource, _dono_nome(owner))
 
     dono = _dono_nome(owner)
+
+    if pedido_pelo_usuario:
+        # Eixo de PROVENIENCIA (T-020, achado do ensaio T-013). O deny abaixo
+        # existe para barrar kill nascido de inferencia minha. Quando o proprio
+        # Vinicius nomeia o alvo no turno, a razao antiga terminava em "pergunte
+        # ao Vinicius" -- pedir autorizacao a quem deu a ordem. Isso nao evita
+        # perda: ele mata por fora, sem gate e sem registro. Entao vira warn com
+        # o CUSTO explicito, que e a informacao que ele nao tem.
+        razao = (
+            f"ATENCAO: voce pediu para matar {resource.id}, e ele tem claim de "
+            f"{dono} (sessao viva). Matar agora derruba o que essa sessao esta "
+            "fazendo, e o trabalho dela nao volta. Segue liberado porque a ordem "
+            "e sua, nao inferencia minha. Antes de confirmar, considere: mandar "
+            f"SendMessage para {dono} pedindo para liberar, ou usar outro "
+            "servidor/perfil. Lembre que fechar o browser pelo MCP nao mata o "
+            "processo — processo vivo nao prova que alguem esta usando."
+        )
+        return Decision("warn", _trunca_razao(razao), "forte", resource.id, dono)
+
     razao = (
         f"DENY: kill recusado — {resource.id} tem claim de {dono} (sessao "
         f"{owner.owner.session_id}). O ramo de kill NUNCA decide por idade do "
@@ -421,7 +445,12 @@ def decide(
         return Decision("allow", _trunca_razao(razao), "info", resource.id, None)
 
     if resource.kind in ("process", "browser") and resource.action == "kill":
-        return _decidir_kill(resource, owner, me)
+        # `estado_ilegivel` ja foi tratado acima e vence a proveniencia de
+        # proposito: ali nao da para saber SE existe dono, entao liberar por
+        # ordem do usuario seria decidir no escuro sobre algo irreversivel.
+        return _decidir_kill(
+            resource, owner, me, bool(ctx.get("kill_pedido_pelo_usuario"))
+        )
 
     if resource.kind == "git" and resource.action in _ACOES_GIT_ESCRITA:
         return _decidir_git_escrita(resource, me, peers_list, ctx)

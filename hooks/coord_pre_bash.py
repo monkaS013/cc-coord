@@ -319,6 +319,30 @@ def _construir_decisor(hookio, sessions, claims, classify, policy, carimbos):
                 else:
                     owner_claim = claims.owner_of(recurso.id)
 
+                # Eixo de PROVENIENCIA (T-020, achado do ensaio T-013): o deny
+                # existe para barrar kill que nasce de INFERENCIA minha. Quando
+                # o proprio Vinicius nomeia o alvo no turno, a razao antiga
+                # mandava "pergunte ao Vinicius" -- pedir autorizacao a quem deu
+                # a ordem. Vira warn com o custo explicito.
+                #
+                # So no ramo de kill (raro): o caminho quente de Edit/Write
+                # nunca le transcript, e a leitura pega so o fim do arquivo.
+                # Se a leitura falhar, `kill_autorizado_pelo_usuario` devolve
+                # False e o deny permanece -- ausencia de prova nao vira
+                # autorizacao.
+                if owner_claim is not None:
+                    try:
+                        from ccoord.proveniencia import (
+                            kill_autorizado_pelo_usuario,
+                            ultimo_prompt_do_usuario,
+                        )
+
+                        pedido = ultimo_prompt_do_usuario(payload.get("transcript_path") or "")
+                        if kill_autorizado_pelo_usuario(recurso.id, pedido):
+                            contexto["kill_pedido_pelo_usuario"] = True
+                    except Exception:  # noqa: BLE001 - fail-closed: segue deny
+                        pass
+
             itens.append((recurso, owner_claim, contexto))
 
         peers_vivas = sessions.peers(exclude_pid=exclude_pid) if precisa_peers else []

@@ -66,6 +66,13 @@ fazendo, para que nenhuma apague, mate ou refaça o trabalho da outra.
 - **Quando** chega um `Write` (que reescreve o arquivo inteiro)
 - **Então** o aviso é mais forte que o de `Edit` e sugere edição cirúrgica no lugar da reescrita
 
+#### AC-018 — Kill que o Vinicius nomeou é aviso, não recusa
+
+- **Dado** um processo com claim de outra sessão viva, e um turno em que o Vinicius **nomeou esse alvo** junto de um pedido de kill
+- **Quando** chega o comando de kill
+- **Então** a decisão é `warn` — dizendo quem perde trabalho e o que fazer antes de confirmar — e **não** `deny`; e a razão não pede a autorização de quem já deu a ordem
+- **E** quando o alvo **não** foi nomeado pelo usuário (kill nascido de inferência minha), a decisão continua sendo `deny`
+
 #### AC-006 — Porta ocupada recebe porta livre concreta
 
 - **Dado** `port:8099` com lease de outra sessão
