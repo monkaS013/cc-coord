@@ -106,10 +106,19 @@ def _slug_path(path: str) -> str:
     (quem escreve o carimbo de mudanca externa e le/escreve o de eco) e em
     coord_post_batch.py (quem tambem consome carimbos de mudanca) — daí a
     normalizacao simples e sem dependencia de nada alem de string.
+    
+    FONTE UNICA desde 12/09: delega para `ccoord.carimbos.slug_path`. A copia
+    local aqui divergiu quando a resolucao de nome curto 8.3 entrou no modulo
+    comum -- escritor e leitor do carimbo passaram a usar chaves diferentes, e
+    o sintoma (aviso falso de mudanca externa) aponta para o lugar errado.
     """
-    normalizado = (path or "").strip().replace("\\", "/").lower()
-    seguro = "".join(c if (c.isalnum() or c in "-._") else "_" for c in normalizado)
-    return seguro or "arquivo"
+    try:
+        from ccoord.carimbos import slug_path
+
+        return slug_path(path)
+    except Exception:  # noqa: BLE001 - fail-open: normalizacao antiga, nunca quebrar o turno
+        normalizado = (path or "").strip().replace("\\", "/").lower()
+        return "".join(c if (c.isalnum() or c in "-._") else "_" for c in normalizado) or "arquivo"
 
 
 def _marcar_escrita_propria(path: str, session_id: str) -> None:

@@ -23,7 +23,10 @@ RAIZ = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(os.path.dirname(RAIZ), "src")
 sys.path.insert(0, SRC)
 
+import ctypes  # noqa: E402
+
 from ccoord.classify import classify  # noqa: E402
+from ccoord.classify import _resolver_nome_curto  # noqa: E402
 
 
 class TestClassify(unittest.TestCase):
@@ -702,6 +705,50 @@ class TestCopiaEMoveComoEscrita(unittest.TestCase):
                 self.assertEqual(self._arquivos(inocente), [])
 
 
+class TestNomeCurto8_3(unittest.TestCase):
+    """Gate CEGO medido no ensaio com duas sessoes reais (12/09).
+
+    Uma sessao segurava `...\\VINICI~1\\...\\compartilhado.py` e a outra editava
+    `...\\ViniciusMoraisHDT\\...\\compartilhado.py`. `os.path.samefile` = True,
+    ids diferentes, nenhuma via a outra. O diretorio de scratchpad entregue a
+    cada sessao vem no formato 8.3, entao isto valeria para quase toda sessao.
+    """
+
+    def test_curto_e_longo_do_mesmo_arquivo_colapsam_no_mesmo_id(self):
+        "@spec:AC-004 caminho 8.3 e caminho longo do MESMO arquivo tem o mesmo id"
+        import os
+        import tempfile
+
+        with tempfile.TemporaryDirectory(prefix="ccoord ensaio ") as base:
+            # nome com espaco força o Windows a gerar o alias 8.3
+            longo = os.path.join(base, "arquivo alvo.txt")
+            with open(longo, "w", encoding="utf-8") as f:
+                f.write("x")
+            buf = ctypes.create_unicode_buffer(32768)
+            n = ctypes.windll.kernel32.GetShortPathNameW(longo, buf, len(buf))
+            curto = buf.value if 0 < n < len(buf) else ""
+            if not curto or "~" not in curto:
+                # volume sem 8.3: o repro do ensaio nao pode ser montado aqui.
+                # Fica a prova direta do resolvedor, que nao depende do volume.
+                self.assertEqual(_resolver_nome_curto(longo), longo)
+                return
+            id_curto = classify("Write", {"file_path": curto, "content": "a"}, "")[0].id
+            id_longo = classify("Write", {"file_path": longo, "content": "a"}, "")[0].id
+            self.assertTrue(os.path.samefile(curto, longo))
+            self.assertEqual(id_curto, id_longo, "mesmo arquivo tem de ter o mesmo id")
+
+    def test_caminho_sem_8_3_nao_consulta_o_so(self):
+        "@spec:AC-004 caminho sem `~N` e identidade pura (nao paga consulta ao SO)"
+        for p in (r"C:\dev\repo\app.js", r"\\server\share\x.md", "relativo.txt", ""):
+            with self.subTest(p=p):
+                self.assertEqual(_resolver_nome_curto(p), p)
+
+    def test_caminho_8_3_inexistente_devolve_o_original(self):
+        "@spec:AC-004 8.3 que nao existe no disco devolve o original, nao inventa"
+        fantasma = r"Q:\NAOEXI~1\tambem\nao\existe.txt"
+        self.assertEqual(_resolver_nome_curto(fantasma), fantasma)
+
+
 class TestCwdEfetivoNoEnsaioReal(unittest.TestCase):
     """Falso negativo pego pelo ENSAIO com sessao real (12/09), nao pelos testes.
 
@@ -790,8 +837,7 @@ class TestCwdEfetivoNoEnsaioReal(unittest.TestCase):
         # caminho do scratchpad desta maquina, o diretorio mais usado da sessao.
         curto = r"C:\Users\VINICI~1\AppData\Local\Temp\x"
         alvo = self._arquivos(f"cd {curto}\necho a > relativo.txt")
-        self.assertEqual(len(alvo), 1)
-        self.assertIn("vinici~1", alvo[0].id)
+        self.assertEqual(len(alvo), 1, "`~` no meio do caminho nao pode zerar o gate")
         self.assertIn("temp-x-relativo.txt", alvo[0].id)
 
     def test_til_no_inicio_continua_sendo_home_desconhecido(self):
