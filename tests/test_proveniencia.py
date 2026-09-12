@@ -229,6 +229,47 @@ class TestPoliticaComProveniencia(unittest.TestCase):
         self.assertEqual(d.verdict, "deny")
 
 
+class TestPeerNaHomeNaoBloqueiaRepo(unittest.TestCase):
+    """Falso positivo achado pelo USO real (12/09), nao por teste.
+
+    O gate recusou o meu proprio `git push` do cc-coord porque havia duas
+    sessoes ociosas em `C:\\Users\\ViniciusMoraisHDT`. A condicao antiga tratava
+    peer em diretorio ANCESTRAL como "no mesmo repositorio" -- e a home e
+    ancestral de tudo, entao uma sessao parada ali bloqueava commit e push de
+    qualquer repo da maquina. Atrito puro, exatamente o defeito que a politica
+    existe para evitar.
+    """
+
+    def _commit_em(self, repo, cwd_da_peer):
+        return policy.decide(
+            Resource(kind="git", id="git:" + repo.lower().replace("\\", "-"), path=repo, action="commit"),
+            owner=None,
+            me=_SessaoFalsa(session_id="eu", cwd=repo),
+            peers=[_SessaoFalsa(session_id="peer-1", name="peer-viva", cwd=cwd_da_peer)],
+            contexto={},
+        )
+
+    def test_peer_na_home_nao_bloqueia_commit_em_repo_abaixo(self):
+        "@spec:AC-007 sessao na HOME nao conta como sessao no repo"
+        d = self._commit_em(r"C:\Users\Vinicius\dev\cc-coord", r"C:\Users\Vinicius")
+        self.assertEqual(d.verdict, "allow", "sessao parada na home nao pode travar a maquina inteira")
+
+    def test_peer_dentro_do_repo_continua_bloqueando(self):
+        "@spec:AC-007 peer NO repo segue gerando deny (nao-vacuidade)"
+        d = self._commit_em(r"C:\Users\Vinicius\dev\cc-coord", r"C:\Users\Vinicius\dev\cc-coord")
+        self.assertEqual(d.verdict, "deny")
+
+    def test_peer_em_subdiretorio_do_repo_tambem_bloqueia(self):
+        "@spec:AC-007 peer em subpasta do repo esta no repo"
+        d = self._commit_em(r"C:\Users\Vinicius\dev\cc-coord", r"C:\Users\Vinicius\dev\cc-coord\src")
+        self.assertEqual(d.verdict, "deny")
+
+    def test_repo_irmao_nao_bloqueia(self):
+        "@spec:AC-007 repo vizinho nao e o mesmo repo"
+        d = self._commit_em(r"C:\Users\Vinicius\dev\cc-coord", r"C:\Users\Vinicius\dev\outro")
+        self.assertEqual(d.verdict, "allow")
+
+
 class TestAvisoDeHookDesatualizado(unittest.TestCase):
     """Protecao contra o falso verde que me pegou em 12/09.
 
