@@ -116,11 +116,27 @@ def _norm(caminho: Optional[str]) -> str:
 
 
 def _mesmo_repo(peer_cwd: Optional[str], repo_path: Optional[str]) -> bool:
+    """A peer esta trabalhando DENTRO deste repo?
+
+    Conta o proprio diretorio do repo e qualquer subdiretorio dele (uma peer em
+    `repo/src` esta no repo). NAO conta o caminho inverso -- peer num diretorio
+    ANCESTRAL do repo --, e isso e uma correcao de 12/09 achada pelo uso real:
+    a condicao antiga (`b.startswith(a + "/")`) tratava uma sessao aberta na
+    HOME como "no mesmo repositorio" de qualquer repo abaixo dela. Como a home
+    e ancestral de tudo, **uma unica sessao ociosa ali bloqueava todo commit e
+    push da maquina** -- o gate recusou o meu proprio push do cc-coord por causa
+    de duas sessoes paradas em `C:\\Users\\ViniciusMoraisHDT`.
+
+    Atrito puro, do tipo que a politica existe para evitar: estar acima de um
+    repo nao e evidencia de estar mexendo nele. O preco e um falso negativo
+    estreito -- peer registrada na home que faz `cd <repo> && git commit` --,
+    muito melhor que recusar trabalho legitimo o tempo todo.
+    """
     a = _norm(peer_cwd)
     b = _norm(repo_path)
     if not a or not b:
         return False
-    return a == b or a.startswith(b + "/") or b.startswith(a + "/")
+    return a == b or a.startswith(b + "/")
 
 
 def _reponame_do_cwd(cwd: Optional[str]) -> str:
