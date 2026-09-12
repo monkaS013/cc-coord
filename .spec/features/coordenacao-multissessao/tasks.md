@@ -89,6 +89,12 @@
 - Arquivos: src/ccoord/carimbos.py, hooks/coord_pre_bash.py, tests/_guarda.py, tests/__init__.py
 - Notas: achado ALTA da 4a auditoria (12/09). O ramo novo de escrita-de-arquivo-via-Bash nao carimbava a escrita propria, entao o `FileChanged` seguinte deixava de ser reconhecido como eco e a sessao recebia aviso FALSO de "mudou em disco por outro processo" sobre a propria escrita. A funcao vivia duplicada em dois hooks (duplicacao consciente da T-09, que so podia tocar em `hooks/`); virou `ccoord.carimbos`, fonte unica -- duas implementacoes de `slug_path` divergindo em um caractere fariam o eco nunca casar, e o sintoma nao apontaria para a causa. Junto: `tests/_guarda.py` fecha o buraco de isolamento que o `tests/__init__.py` nao pegava (`unittest discover -s tests` sem `-t` carrega os modulos soltos e nunca importa o pacote -- medido, vazou 2 linhas para o events.log real).
 
+## T-019 - Mesmo arquivo, duas grafias de caminho, mesmo id [concluida]
+
+- Refs: AC-004, AC-005, AC-015, AC-016
+- Arquivos: src/ccoord/paths.py, src/ccoord/classify.py, src/ccoord/carimbos.py, src/ccoord/sessions.py, hooks/coord_pre_write.py, hooks/coord_file_changed.py, tests/test_classify.py, tests/test_entrypoints.py
+- Notas: achado do ENSAIO com duas sessoes reais (T-013, 12/09) -- nao dos 233 testes nem dos 17/17 ACs. Uma sessao segurava `...VINICI~1...\compartilhado.py` e a outra editava `...ViniciusMoraisHDT...\compartilhado.py`: `os.path.samefile` = True, ids diferentes, gate CEGO. Nao e hipotetico -- o diretorio de scratchpad entregue a cada sessao vem no formato 8.3, entao valeria para quase toda sessao. `ccoord.paths.resolver_nome_curto` e a fonte unica (unica consulta ao SO no caminho de classificacao, so quando ha `~<digito>`, memoizada); ligada em classify, carimbos, sessions (o `cwd` da peer tambem e chave) e nos dois hooks que ainda tinham copia local de `slug_path` -- a "fonte unica" da T-018 tinha ficado pela metade, e a metade que faltava foi exatamente a que quebrou. Sintoma didatico: 7 testes falharam apontando "o aviso sumiu" quando o codigo estava certo e a COPIA no proprio teste e que estava velha. Fica aberto de proposito: unidade mapeada x UNC.
+
 ## T-014 — Fechamento mecânico [concluida]
 - Refs: AC-001, AC-002, AC-003, AC-004, AC-005, AC-006, AC-007, AC-008, AC-009, AC-010, AC-011, AC-012, AC-013, AC-014, AC-015, AC-016, AC-017
 - Arquivos: .spec/verification/coordenacao-multissessao.json

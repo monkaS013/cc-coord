@@ -25,6 +25,8 @@ import json
 import os
 import time
 
+from ccoord.paths import resolver_nome_curto
+
 __all__ = ["home", "slug_path", "marcar_escrita_propria", "consumir_carimbo_pendente"]
 
 
@@ -40,7 +42,15 @@ def home() -> str:
 
 
 def slug_path(path: str) -> str:
-    """Nome de arquivo derivado de um caminho, estavel entre escritor e leitor."""
+    """Nome de arquivo derivado de um caminho, estavel entre escritor e leitor.
+
+    Passa pela MESMA resolucao de nome curto 8.3 que `classify` usa para montar
+    o id do claim (`ccoord.paths`). Sem isso, `VINICI~1\\x.py` e
+    `ViniciusMoraisHDT\\x.py` -- o MESMO arquivo -- geram carimbos diferentes,
+    o eco da escrita propria nunca casa, e a sessao recebe aviso falso de
+    mudanca externa sobre a propria escrita.
+    """
+    path = resolver_nome_curto(path)
     normalizado = (path or "").strip().replace("\\", "/").lower()
     seguro = "".join(c if (c.isalnum() or c in "-._") else "_" for c in normalizado)
     return seguro or "arquivo"

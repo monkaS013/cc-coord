@@ -374,7 +374,10 @@ def _decidir_arquivo(resource: Resource, owner: Optional[Claim], me: Optional[Se
         return Decision("warn", _trunca_razao(razao), "info", resource.id, dono)
 
     razao = (
-        f"Aviso curto: {dono} tambem esta em {resource.path}, em {faixa_txt} — "
+        # Parenteses em vez de preposicao: `faixa_txt` tanto e "as linhas 5-15"
+        # quanto "o arquivo inteiro", e qualquer preposicao fixa erra num dos
+        # dois ("em as linhas", "em o arquivo") -- visto na saida real do ensaio.
+        f"Aviso curto: {dono} tambem esta em {resource.path} ({faixa_txt}) — "
         "sem sobreposicao com a sua edicao. So ciencia, nada a fazer."
     )
     return Decision("warn", _trunca_razao(razao), "info", resource.id, dono)

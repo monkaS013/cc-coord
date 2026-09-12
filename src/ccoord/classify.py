@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import re
 
+from ccoord.paths import resolver_nome_curto as _resolver_nome_curto
+
 # `LerArquivo` (assinatura da funcao injetada de leitura de arquivo, usada so
 # em anotacoes) NAO e um alias `Callable[[str], Optional[str]]` de verdade:
 # isso exigiria `import typing` em tempo de import (~2ms a toa no caminho
@@ -129,7 +131,7 @@ def _normalize_path(path: str, cwd: str = "") -> Tuple[str, str]:
         `test_unidade_mapeada_vs_unc_e_limitacao_conhecida_sem_io` em
         tests/test_classify.py.
     """
-    bruto = (path or "").strip().replace("\\", "/")
+    bruto = _resolver_nome_curto((path or "").strip()).replace("\\", "/")
 
     # \\?\ (prefixo de caminho estendido do Windows) e \\?\UNC\... — string
     # pura, sem IO (achado #2, parte corrigivel). \\?\C:\x -> C:\x;

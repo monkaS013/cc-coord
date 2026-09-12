@@ -1068,14 +1068,19 @@ class TestFailClosedComClaimDoRecursoCorrompido(_AmbienteTemporario):
 
 
 def _slug_path_como_nos_hooks(path: str) -> str:
-    """Mesma normalizacao de `_slug_path` em coord_pre_write.py/
-    coord_file_changed.py/coord_post_batch.py -- duplicada aqui so para o
-    teste poder escrever um carimbo em `changed/`/`own_writes/` com o MESMO
-    nome de arquivo que o hook vai procurar (mesma razao de duplicacao entre
-    os proprios hooks: sem modulo comum, restricao da task)."""
-    normalizado = (path or "").strip().replace("\\", "/").lower()
-    seguro = "".join(c if (c.isalnum() or c in "-._") else "_" for c in normalizado)
-    return seguro or "arquivo"
+    """Delega para a FONTE UNICA (`ccoord.carimbos.slug_path`).
+
+    Era uma copia da normalizacao, escrita quando os hooks ainda nao tinham
+    modulo comum. A copia envelheceu e mordeu em 12/09: ao ligar a resolucao de
+    nome curto 8.3 (`VINICI~1` -> `ViniciusMoraisHDT`) em `carimbos.slug_path`,
+    o teste continuou gerando o slug antigo e 7 casos falharam apontando para o
+    lugar errado -- o teste dizia "o aviso sumiu" quando o codigo estava certo e
+    a copia e que estava velha. Teste que replica a logica que deveria checar
+    nao verifica nada: ele passa junto com o bug e falha junto com a correcao.
+    """
+    from ccoord.carimbos import slug_path
+
+    return slug_path(path)
 
 
 class TestPostBatchNaoDescartaCarimboQueNaoCoube(_AmbienteTemporario):

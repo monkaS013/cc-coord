@@ -173,10 +173,17 @@ def _local_pid_domain() -> str:
 
 
 def _parse_session(data: dict) -> Session:
+    # O `cwd` da peer vira CHAVE de comparacao (mesmo repo? mesmo arquivo?),
+    # entao passa pela mesma resolucao de nome curto 8.3 que `classify` usa.
+    # Sem isso, uma sessao registrada como `...VINICI~1\repo` nao casa com o
+    # repo `...ViniciusMoraisHDT\repo` do comando, e o deny de commit com peer
+    # viva simplesmente nao sai -- medido em 12/09, dois testes de AC-007.
+    from ccoord.paths import resolver_nome_curto
+
     return Session(
         pid=data.get("pid"),
         session_id=data.get("sessionId"),
-        cwd=data.get("cwd"),
+        cwd=resolver_nome_curto(data.get("cwd") or "") or None,
         name=data.get("name"),
         status=data.get("status"),
         updated_at=data.get("updatedAt"),

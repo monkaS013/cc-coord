@@ -60,10 +60,19 @@ def _ccoord_home() -> str:
 def _slug_path(path: str) -> str:
     """Precisa ser IDENTICO ao de coord_pre_write.py/coord_post_batch.py —
     ver o comentario la sobre a duplicacao (restricao da task: sem modulo
-    comum entre os 7 entrypoints)."""
-    normalizado = (path or "").strip().replace("\\", "/").lower()
-    seguro = "".join(c if (c.isalnum() or c in "-._") else "_" for c in normalizado)
-    return seguro or "arquivo"
+    comum entre os 7 entrypoints).
+    FONTE UNICA desde 12/09: delega para `ccoord.carimbos.slug_path`. A copia
+    local aqui divergiu quando a resolucao de nome curto 8.3 entrou no modulo
+    comum -- escritor e leitor do carimbo passaram a usar chaves diferentes, e
+    o sintoma (aviso falso de mudanca externa) aponta para o lugar errado.
+    """
+    try:
+        from ccoord.carimbos import slug_path
+
+        return slug_path(path)
+    except Exception:  # noqa: BLE001 - fail-open: normalizacao antiga, nunca quebrar o turno
+        normalizado = (path or "").strip().replace("\\", "/").lower()
+        return "".join(c if (c.isalnum() or c in "-._") else "_" for c in normalizado) or "arquivo"
 
 
 _JANELA_ECO_MS = 15_000
