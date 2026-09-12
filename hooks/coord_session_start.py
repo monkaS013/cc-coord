@@ -148,9 +148,57 @@ def _construir_decisor(sessions):
                     f"  - {dados.get('path', '?')} ({dados.get('event', '?')}) as {horario}"
                 )
 
+        desatualizados = _entrypoints_desatualizados()
+        if desatualizados:
+            linhas.append(
+                "ATENCAO: estes hooks instalados estao DIFERENTES do repo "
+                f"({', '.join(desatualizados)}). O que roda agora e a copia "
+                "antiga; a suite de testes exercita a do repo, entao ela pode "
+                "estar verde sobre codigo que nao esta no ar. Rode "
+                "`ccoord install` para sincronizar."
+            )
+
         return SimpleNamespace(verdict="warn", reason="\n".join(linhas))
 
     return _decisor
+
+
+def _entrypoints_desatualizados() -> list:
+    """Entrypoints instalados cujo conteudo divergiu do repo.
+
+    Existe por um erro concreto (12/09): editei `coord_pre_bash.py` no repo, os
+    256 testes passaram -- eles rodam o arquivo do REPO -- e a producao seguiu
+    executando a copia antiga em `~/.claude/hooks/`. Gate verde sobre codigo que
+    nao esta no ar; so apareceu porque fui medir o comportamento real. Um teste
+    nao pega isso (dependeria da maquina), entao o aviso vive aqui.
+
+    Best-effort: sem `CCOORD_SRC`, sem repo ao lado, ou com erro de leitura,
+    devolve lista vazia -- nunca atrapalha o inicio da sessao.
+    """
+    try:
+        import hashlib
+
+        src = os.environ.get("CCOORD_SRC")
+        if not src:
+            return []
+        repo_hooks = os.path.join(os.path.dirname(src.rstrip("\\/")), "hooks")
+        instalados = os.path.dirname(os.path.abspath(__file__))
+        if os.path.normcase(repo_hooks) == os.path.normcase(instalados):
+            return []  # rodando direto do repo: nao ha copia para divergir
+
+        fora = []
+        for nome in sorted(os.listdir(instalados)):
+            if not nome.startswith("coord_") or not nome.endswith(".py"):
+                continue
+            origem = os.path.join(repo_hooks, nome)
+            if not os.path.isfile(origem):
+                continue
+            with open(origem, "rb") as a, open(os.path.join(instalados, nome), "rb") as b:
+                if hashlib.sha256(a.read()).digest() != hashlib.sha256(b.read()).digest():
+                    fora.append(nome)
+        return fora
+    except Exception:  # noqa: BLE001 - aviso e opcional, inicio de sessao nao
+        return []
 
 
 def main() -> int:

@@ -229,5 +229,75 @@ class TestPoliticaComProveniencia(unittest.TestCase):
         self.assertEqual(d.verdict, "deny")
 
 
+class TestAvisoDeHookDesatualizado(unittest.TestCase):
+    """Protecao contra o falso verde que me pegou em 12/09.
+
+    Editei `coord_pre_bash.py` no repo, os 256 testes passaram -- eles rodam o
+    arquivo do REPO -- e a producao seguiu executando a copia antiga em
+    `~/.claude/hooks/`. Gate verde sobre codigo que nao esta no ar. So apareceu
+    porque fui medir o comportamento real; nenhum teste pegaria.
+    """
+
+    def _monta(self, iguais: bool):
+        import hashlib
+        import shutil
+
+        base = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, base, True)
+        repo_hooks = os.path.join(base, "repo", "hooks")
+        src = os.path.join(base, "repo", "src")
+        instalados = os.path.join(base, "claude", "hooks")
+        for d in (repo_hooks, src, instalados):
+            os.makedirs(d)
+        with open(os.path.join(repo_hooks, "coord_x.py"), "w", encoding="utf-8") as f:
+            f.write("versao nova\n")
+        with open(os.path.join(instalados, "coord_x.py"), "w", encoding="utf-8") as f:
+            f.write("versao nova\n" if iguais else "versao ANTIGA\n")
+        del hashlib
+        return src, instalados
+
+    def _rodar(self, src, instalados):
+        """Executa a funcao com `__file__` apontando para a copia instalada."""
+        caminho = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "hooks",
+            "coord_session_start.py",
+        )
+        with open(caminho, encoding="utf-8") as fh:
+            codigo = fh.read()
+        escopo = {
+            "__file__": os.path.join(instalados, "coord_session_start.py"),
+            "__name__": "hook_sob_teste",
+        }
+        os.environ["CCOORD_SRC"] = src
+        self.addCleanup(os.environ.pop, "CCOORD_SRC", None)
+        exec(compile(codigo, caminho, "exec"), escopo)  # noqa: S102
+        return escopo["_entrypoints_desatualizados"]()
+
+    def test_avisa_quando_o_hook_instalado_esta_velho(self):
+        "@spec:AC-012 hook instalado diferente do repo aparece no mapa do SessionStart"
+        src, instalados = self._monta(iguais=False)
+        self.assertEqual(self._rodar(src, instalados), ["coord_x.py"])
+
+    def test_nao_avisa_quando_esta_sincronizado(self):
+        "@spec:AC-012 sem divergencia, nenhum aviso (nao-vacuidade)"
+        src, instalados = self._monta(iguais=True)
+        self.assertEqual(self._rodar(src, instalados), [])
+
+    def test_sem_ccoord_src_nao_quebra_nem_inventa_aviso(self):
+        "@spec:AC-012 sem CCOORD_SRC o aviso e omitido, nunca levanta"
+        _, instalados = self._monta(iguais=False)
+        os.environ.pop("CCOORD_SRC", None)
+        caminho = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "hooks",
+            "coord_session_start.py",
+        )
+        escopo = {"__file__": os.path.join(instalados, "x.py"), "__name__": "hook_sob_teste"}
+        with open(caminho, encoding="utf-8") as fh:
+            exec(compile(fh.read(), caminho, "exec"), escopo)  # noqa: S102
+        self.assertEqual(escopo["_entrypoints_desatualizados"](), [])
+
+
 if __name__ == "__main__":
     unittest.main()
