@@ -700,3 +700,129 @@ class TestCopiaEMoveComoEscrita(unittest.TestCase):
         for inocente in ("cp -r pasta/", "echo copy isso", "ls", "Copy-Item -Recurse pasta/"):
             with self.subTest(comando=inocente):
                 self.assertEqual(self._arquivos(inocente), [])
+
+
+class TestCwdEfetivoNoEnsaioReal(unittest.TestCase):
+    """Falso negativo pego pelo ENSAIO com sessao real (12/09), nao pelos testes.
+
+    O `_efetivo_cwd` so reconhecia `cd <dir> &&` colado no INICIO do comando.
+    Um bloco de shell de varias linhas -- a forma mais comum de comando que eu
+    mesma escrevo -- deixava o `cd` invisivel, e todo caminho relativo era
+    resolvido contra o cwd da SESSAO. Medido no ensaio: 3 claims criados sobre
+    `C:\\...\\dev\\cc-coord\\alvo.txt`, arquivo que nao existe, enquanto o
+    arquivo real (em outro diretorio) ficava sem claim nenhum. Isso e pior que
+    ausencia de gate: protege fantasma e deixa o alvo real aberto.
+
+    Segundo defeito na mesma funcao: `cd "$VAR"` era tratado como se `$VAR`
+    fosse o NOME de um diretorio, entao o cwd virava `<cwd>\\$VAR` -- um
+    caminho inventado. Nao da para saber o valor da variavel sem executar o
+    comando, entao o unico resultado honesto e "cwd desconhecido", e com cwd
+    desconhecido um caminho RELATIVO nao pode virar claim.
+    """
+
+    def _arquivos(self, comando, cwd=r"C:\dev\sessao"):
+        return [r for r in classify("Bash", {"command": comando}, cwd) if r.kind == "file"]
+
+    def test_cd_em_linha_separada_muda_o_cwd_efetivo(self):
+        "@spec:AC-BashWrite cd em linha propria (bloco multilinha) e respeitado, nao so `cd X &&`"
+        multilinha = "cd C:\\dev\\real\necho x > alvo.txt"
+        encadeado = classify(
+            "Bash", {"command": "cd C:\\dev\\real && echo x > alvo.txt"}, r"C:\dev\sessao"
+        )
+        alvo_multi = self._arquivos(multilinha)
+        alvo_enc = [r for r in encadeado if r.kind == "file"]
+        self.assertEqual(len(alvo_multi), 1)
+        self.assertEqual(alvo_multi[0].id, alvo_enc[0].id)
+        self.assertNotIn("sessao", alvo_multi[0].id)
+
+    def test_cd_depois_de_outro_comando_na_cadeia(self):
+        "@spec:AC-BashWrite cd no MEIO da cadeia conta (nao so no inicio do comando)"
+        alvo = self._arquivos("mkdir -p C:\\dev\\real && cd C:\\dev\\real && echo x > alvo.txt")
+        self.assertEqual(len(alvo), 1)
+        self.assertIn("c--dev-real-alvo.txt", alvo[0].id)
+
+    def test_cd_para_variavel_nao_inventa_caminho(self):
+        "@spec:AC-BashWrite cd para valor nao-literal ($VAR) torna o cwd desconhecido: relativo nao vira claim"
+        alvo = self._arquivos('TD="C:/x"\ncd "$TD"\necho x > alvo.txt')
+        self.assertEqual(
+            alvo,
+            [],
+            "com cwd desconhecido, resolver o relativo contra o cwd da sessao cria claim fantasma",
+        )
+
+    def test_cwd_desconhecido_nao_apaga_caminho_absoluto(self):
+        "@spec:AC-BashWrite cwd desconhecido nao cega o gate: alvo ABSOLUTO continua virando claim"
+        alvo = self._arquivos('cd "$TD"\necho x > C:\\dev\\real\\alvo.txt')
+        self.assertEqual(len(alvo), 1)
+        self.assertIn("c--dev-real-alvo.txt", alvo[0].id)
+
+    def test_maior_que_dentro_de_aspas_nao_e_redirecionamento(self):
+        "@spec:AC-BashWrite `>` dentro de string e dado, nao redirecionamento"
+        # Medido no ensaio: `python -c "print(a, '->', b)"` criava claim sobre um
+        # arquivo chamado `, e[`. Claim sobre arquivo inventado e ruido, e ruido
+        # ensina a ignorar o aviso.
+        for inocente in (
+            "python -c \"print(e['event'], '->', e['path'])\"",
+            'echo "a > b.txt"',
+            "grep 'x>y' arquivo.txt",
+        ):
+            with self.subTest(comando=inocente):
+                self.assertEqual(self._arquivos(inocente), [])
+
+    def test_redirecionamento_de_verdade_continua_valendo(self):
+        "@spec:AC-BashWrite mascarar aspas nao pode apagar redirecionamento real (nao-vacuidade)"
+        simples = self._arquivos("echo x > real.txt")
+        self.assertEqual(len(simples), 1)
+        self.assertIn("real.txt", simples[0].id)
+        # alvo ENTRE aspas: o `>` esta fora delas, entao continua contando
+        com_espaco = self._arquivos('echo x > "meu arquivo.txt"')
+        self.assertEqual(len(com_espaco), 1)
+        self.assertIn("meu arquivo.txt", com_espaco[0].path.lower())
+        # texto entre aspas ANTES de um redirecionamento real nao pode desarma-lo
+        misto = self._arquivos('echo "a -> b" > real.txt')
+        self.assertEqual(len(misto), 1)
+        self.assertIn("real.txt", misto[0].id)
+
+    def test_til_no_meio_do_caminho_e_nome_curto_8_3_nao_valor_de_runtime(self):
+        "@spec:AC-BashWrite ~ no MEIO do caminho e nome curto 8.3 do Windows, nao HOME"
+        # Regressao que eu mesma introduzi e o ensaio pegou: marcar `~` como
+        # nao-literal cegava o gate em `C:\\Users\\VINICI~1\\AppData\\...` -- o
+        # caminho do scratchpad desta maquina, o diretorio mais usado da sessao.
+        curto = r"C:\Users\VINICI~1\AppData\Local\Temp\x"
+        alvo = self._arquivos(f"cd {curto}\necho a > relativo.txt")
+        self.assertEqual(len(alvo), 1)
+        self.assertIn("vinici~1", alvo[0].id)
+        self.assertIn("temp-x-relativo.txt", alvo[0].id)
+
+    def test_til_no_inicio_continua_sendo_home_desconhecido(self):
+        "@spec:AC-BashWrite ~ como PRIMEIRO caractere segue sendo HOME (destino de runtime)"
+        self.assertEqual(self._arquivos("cd ~/dev\necho a > relativo.txt"), [])
+
+    def test_sem_cd_o_relativo_continua_resolvendo_contra_a_sessao(self):
+        "@spec:AC-BashWrite sem cd nenhum, o comportamento antigo permanece (nao-vacuidade)"
+        alvo = self._arquivos("echo x > alvo.txt")
+        self.assertEqual(len(alvo), 1)
+        self.assertIn("c--dev-sessao-alvo.txt", alvo[0].id)
+
+    def test_cwd_desconhecido_nao_acusa_repo_no_commit(self):
+        "@spec:AC-007 com cwd desconhecido, nao afirmar em QUAL repo o commit acontece"
+        recursos = classify(
+            "Bash", {"command": 'cd "$REPO"\ngit commit -m x'}, r"C:\dev\sessao"
+        )
+        repos = [r for r in recursos if r.kind == "git"]
+        self.assertEqual(
+            repos,
+            [],
+            "apontar o repo da sessao aqui recusaria o commit citando o repo errado",
+        )
+        # Contraprova: sem o `cd $VAR`, o MESMO commit tem de ser reconhecido --
+        # senao este teste passaria por classify() ter parado de ver git.
+        normal = classify("Bash", {"command": "git commit -m x"}, r"C:\dev\sessao")
+        self.assertTrue(any(r.kind == "git" for r in normal))
+        # E um `git -C <repo>` explicito sobrevive ao cwd desconhecido.
+        explicito = classify(
+            "Bash",
+            {"command": 'cd "$REPO"\ngit -C C:\\dev\\real commit -m x'},
+            r"C:\dev\sessao",
+        )
+        self.assertTrue(any(r.kind == "git" for r in explicito))

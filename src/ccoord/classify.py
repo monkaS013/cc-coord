@@ -508,35 +508,72 @@ def _detectar_migracao(command: str, cwd: str):
 # comando; nao tenta entender `if`/subshell/`$(...)` nem `Set-Location` do
 # PowerShell — quando nao acha o padrao, devolve o `cwd` original (mesmo
 # comportamento de hoje).
-_CD_CHAIN = re.compile(
-    r"^\s*cd(?:\s+/d)?\s+(\"[^\"]*\"|'[^']*'|[^\s&;]+)\s*(?:&&|;)\s*",
-    re.IGNORECASE,
-)
+# So reconhecia `cd <dir> &&` colado no INICIO do comando. O ENSAIO com sessao
+# real (12/09) mostrou o buraco: num bloco de shell de VARIAS LINHAS -- a forma
+# mais comum -- o `cd` fica numa linha propria, invisivel para o regex antigo, e
+# todo caminho relativo era resolvido contra o cwd da SESSAO. Medido: 3 claims
+# sobre `dev\cc-coord\alvo.txt` (arquivo que nao existe) enquanto o arquivo
+# real, em outro diretorio, nao tinha claim nenhum. Protege fantasma e deixa o
+# alvo aberto -- pior que nao ter gate.
+_CD_SEG = re.compile(r"^\s*cd(?:\s+/d)?(?:\s+(.*))?$", re.IGNORECASE)
+
+# `cd "$TD"`, `cd %USERPROFILE%`, `cd `pwd``: o destino so existe em tempo de
+# execucao. Tratar `$TD` como nome de pasta produzia `<cwd>\$TD`, um caminho
+# inventado.
+#
+# `~` NAO entra aqui, e isso e uma correcao de um erro meu que o ensaio pegou:
+# so vale como HOME quando e o PRIMEIRO caractere (tratado a parte, abaixo). No
+# meio do caminho e caractere legitimo do nome curto 8.3 do Windows --
+# `C:\Users\VINICI~1\AppData\...` e justamente o caminho do scratchpad desta
+# maquina, entao marcar `~` como nao-literal cegava o gate no diretorio mais
+# usado da sessao.
+_NAO_LITERAL = re.compile(r"[$`%]")
 
 
 def _tem_drive(texto_barras: str) -> bool:
     return len(texto_barras) >= 2 and texto_barras[1] == ":" and texto_barras[0].isalpha()
 
 
-def _efetivo_cwd(command: str, cwd: str) -> str:
-    """cwd real de execucao apos um prefixo `cd <dir> &&`/`;` encadeado."""
+def _e_absoluto(caminho: str) -> bool:
+    barras = caminho.replace("\\", "/")
+    return _tem_drive(barras) or barras.startswith("/")
+
+
+def _segmentos_ordenados(command: str) -> list:
+    """Segmentos na ordem de execucao. Diferente de `_segmentos_bash`, quebra
+    tambem por QUEBRA DE LINHA -- sem isso o `cd` de um bloco multilinha some."""
+    return [s for s in re.split(r"&&|\|\||[;|\r\n]", command) if s.strip()]
+
+
+def _efetivo_cwd(command: str, cwd: str):
+    """cwd real de execucao depois dos `cd` do comando.
+
+    Devolve **None** quando o comando muda para um diretorio que so se conhece
+    executando (`cd "$TD"`, `cd %TEMP%`, `cd ~`), ou faz `cd` sem argumento
+    (= HOME no bash). Quem chama tem de tratar None como "nao sei onde isto
+    roda" em vez de assumir o cwd da sessao.
+
+    Nao tenta entender `if`/subshell/`$(...)`/`pushd` nem `Set-Location` do
+    PowerShell; quando nao acha `cd` nenhum, devolve o `cwd` recebido.
+    """
     atual = cwd or ""
-    resto = command
-    while True:
-        m = _CD_CHAIN.match(resto)
+    for seg in _segmentos_ordenados(command):
+        m = _CD_SEG.match(seg.strip())
         if not m:
-            break
-        alvo = m.group(1)
+            continue
+        alvo = (m.group(1) or "").strip()
+        if not alvo:
+            return None
         if len(alvo) >= 2 and alvo[0] in "\"'" and alvo[-1] == alvo[0]:
             alvo = alvo[1:-1]
-        alvo_barras = alvo.replace("\\", "/")
-        if _tem_drive(alvo_barras) or alvo_barras.startswith("/"):
+        if not alvo or _NAO_LITERAL.search(alvo) or alvo.startswith("~"):
+            return None
+        if _e_absoluto(alvo):
             atual = alvo
         elif atual:
             atual = atual.rstrip("\\/") + "\\" + alvo
         else:
             atual = alvo
-        resto = resto[m.end():]
     return atual
 
 
@@ -573,17 +610,65 @@ def _segmentos_bash(command: str) -> list:
     return [s for s in re.split(r"&&|\|\||[;|]", command) if s.strip()]
 
 
+def _recurso_escrita(alvo: str, cwd):
+    """Recurso de escrita de arquivo, ou None quando nao da para saber ONDE.
+
+    Com `cwd is None` (o comando fez `cd "$VAR"`), um caminho relativo nao pode
+    virar claim: resolver contra o cwd da sessao criaria claim sobre um arquivo
+    que nao existe e deixaria o arquivo real desprotegido -- foi exatamente o
+    que o ensaio de 12/09 mediu. Caminho absoluto nao depende do cwd e segue
+    valendo, para o cwd desconhecido nao cegar o gate inteiro.
+    """
+    if cwd is None:
+        if not _e_absoluto(alvo):
+            return None
+        cwd = ""
+    return _resource_from_path("file", alvo, "write", None, cwd)
+
+
 _REDIRECT_ALVO = re.compile(r">{1,2}(?!&)\s*(\"[^\"]*\"|'[^']*'|[^\s|;&<>]+)")
 _ALVOS_DESCARTAVEIS = ("nul", "con", "prn", "/dev/null", "/dev/stdout", "/dev/stderr")
 
 
+def _faixas_entre_aspas(command: str) -> list:
+    """Intervalos (inicio, fim) do texto que esta DENTRO de aspas.
+
+    Um `>` ali e dado, nao redirecionamento. Medido no ensaio de 12/09: o
+    comando `python -c "print(e['event'], '->', e['path'])"` gerava claim sobre
+    um arquivo de nome `, e[` -- o `->` de dentro da string foi lido como
+    redirecionamento. Claim sobre arquivo inventado e ruido que ensina a
+    ignorar o aviso, que e como um gate morre.
+
+    Abre na primeira aspa e fecha so na aspa IGUAL (aspa simples dentro de
+    dupla, e vice-versa, e conteudo). Aspa sem par: vale ate o fim do comando.
+    """
+    faixas = []
+    abertura = None
+    aspa = ""
+    for i, ch in enumerate(command):
+        if abertura is None:
+            if ch in "\"'":
+                abertura, aspa = i, ch
+        elif ch == aspa:
+            faixas.append((abertura, i))
+            abertura, aspa = None, ""
+    if abertura is not None:
+        faixas.append((abertura, len(command)))
+    return faixas
+
+
 def _detectar_redirecionamento(command: str, cwd: str) -> list:
     resources = []
+    faixas = _faixas_entre_aspas(command)
     for m in _REDIRECT_ALVO.finditer(command):
+        if any(ini < m.start() < fim for ini, fim in faixas):
+            continue  # o `>` esta dentro de uma string: e dado, nao redirecao
         alvo = m.group(1).strip("\"'")
         if not alvo or alvo.startswith("(") or alvo.lower() in _ALVOS_DESCARTAVEIS:
             continue
-        resources.append(_resource_from_path("file", alvo, "write", None, cwd))
+        r = _recurso_escrita(alvo, cwd)
+        if r is not None:
+            resources.append(r)
     return resources
 
 
@@ -632,7 +717,9 @@ def _detectar_sed_inplace(command: str, cwd: str) -> list:
         for alvo_path in _alvos_sed(seg):
             if alvo_path.startswith("s/") or alvo_path.startswith("s|"):
                 continue
-            resources.append(_resource_from_path("file", alvo_path, "write", None, cwd))
+            r = _recurso_escrita(alvo_path, cwd)
+            if r is not None:
+                resources.append(r)
     return resources
 
 
@@ -661,7 +748,9 @@ def _detectar_escrita_powershell(command: str, cwd: str) -> list:
         for parte in str(alvo).split(","):
             parte = parte.strip().strip("\"'")
             if parte:
-                resources.append(_resource_from_path("file", parte, "write", None, cwd))
+                r = _recurso_escrita(parte, cwd)
+                if r is not None:
+                    resources.append(r)
     return resources
 
 
@@ -677,7 +766,9 @@ def _detectar_tee(command: str, cwd: str) -> list:
                 continue
             alvo_path = tok.strip("\"'")
             if alvo_path:
-                resources.append(_resource_from_path("file", alvo_path, "write", None, cwd))
+                r = _recurso_escrita(alvo_path, cwd)
+                if r is not None:
+                    resources.append(r)
     return resources
 
 
@@ -724,7 +815,9 @@ def _detectar_copia_move(command: str, cwd: str) -> list:
         destino = caminhos[-1]
         if destino.endswith("/") or destino.endswith("\\"):
             continue  # destino e diretorio explicito
-        resources.append(_resource_from_path("file", destino, "write", None, cwd))
+        r = _recurso_escrita(destino, cwd)
+        if r is not None:
+            resources.append(r)
     return resources
 
 
@@ -752,11 +845,16 @@ def _classify_bash(tool_input: dict, cwd: str):
     # cwd efetivo (achado #3) calculado UMA vez e usado por git/bind/
     # migracao/escrita — todos dependem de "onde o comando roda de verdade".
     cwd_efetivo = _efetivo_cwd(command, cwd)
+    # None = "nao sei em que diretorio isto roda" (`cd "$VAR"`). Para git/bind/
+    # migracao vira "" -- e `_detectar_git` sem repo devolve [] em vez de
+    # apontar o repo da sessao, que recusaria um commit citando o repo errado.
+    # Um `git -C <path>` explicito no comando continua sendo reconhecido.
+    cwd_repo = "" if cwd_efetivo is None else cwd_efetivo
     resources = []
     resources.extend(_detectar_kill(command))
-    resources.extend(_detectar_git(command, cwd_efetivo))
-    resources.extend(_detectar_bind(command, cwd_efetivo))
-    resources.extend(_detectar_migracao(command, cwd_efetivo))
+    resources.extend(_detectar_git(command, cwd_repo))
+    resources.extend(_detectar_bind(command, cwd_repo))
+    resources.extend(_detectar_migracao(command, cwd_repo))
     resources.extend(_detectar_escrita_bash(command, cwd_efetivo))
     return resources
 
