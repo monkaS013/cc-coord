@@ -68,10 +68,10 @@
 - Arquivos: src/ccoord/install.py, tests/test_install.py
 - Notas: SÓ RODA APÓS APROVAÇÃO DO VINICIUS — mexe no settings.json global, que afeta todas as sessões abertas. Backup datado e merge que preserva os hooks existentes.
 
-## T-013 — Ensaio ponta a ponta com duas sessões reais [em-andamento]
+## T-013 — Ensaio ponta a ponta com duas sessões reais [concluida]
 - Refs: AC-003, AC-012, AC-016
-- Arquivos: tools/ensaio/roteiro.md
-- Notas: verificação por grep no transcript JSONL — o modelo é testemunha não confiável do que recebeu.
+- Arquivos: tools/ensaio/roteiro.md, tools/ensaio/resultado.md, tools/ensaio/rodar_cenarios.py
+- Notas: 8 de 8 cenários PASS, o 7 com desfecho diferente do previsto (quem destrava não é a fila entre peers — é o Vinicius, rodando por `!`, que não passa pelo PreToolUse). Verificação por grep no transcript JSONL: o modelo é testemunha não confiável do que recebeu, e isso se confirmou duas vezes (uma sessão afirmou "nenhum aviso apareceu" com o aviso no transcript, e outra afirmou ter sido bloqueada num caso em que o gate nem rodou). Achou 5 defeitos que 233 testes e 17/17 ACs não acharam — ver T-019, T-020, T-021 e resultado.md.
 
 ## T-017 — Fazer o caminho quente caber em 150 ms [concluida]
 - Refs: AC-005, AC-016
@@ -100,6 +100,12 @@
 - Refs: AC-018, AC-009, AC-010
 - Arquivos: src/ccoord/proveniencia.py, src/ccoord/policy.py, hooks/coord_pre_bash.py, tests/test_proveniencia.py, tests/test_entrypoints.py
 - Notas: defeito medido no ensaio T-013 -- o Vinicius mandou `taskkill /F /PID 20448` com todas as letras e o gate devolveu deny com a razao terminando em "pergunte ao Vinicius", pedindo autorizacao a quem deu a ordem. Atrito puro: o desfecho previsivel e ele matar por fora, sem gate e sem registro, e a peer perde o trabalho do mesmo jeito. NAO afrouxa o deny -- separa kill nascido de inferencia minha (segue deny) de kill que o usuario NOMEOU no turno (vira warn com o custo explicito). Autoriza o ALVO, nao a vontade: exige verbo de kill + alvo casando com o recurso, com fronteira de palavra (`process:448` nao casa dentro de `20448`). Duas travas contra auto-autorizacao: `tool_result` chega no transcript com `role="user"` e e descartado (senao a saida de um comando meu viraria ordem dele), e transcript ausente/ilegivel devolve "" = segue deny. `estado_ilegivel` continua vencendo a proveniencia: ali nao da para saber se existe dono. Custo zero no caminho quente -- so o ramo de kill le transcript, e le so os ultimos 64KB.
+
+## T-021 - Correcoes que so o uso expos: o gate atrapalhando quem faz certo [concluida]
+
+- Refs: AC-007, AC-005, AC-017
+- Arquivos: src/ccoord/policy.py, src/ccoord/classify.py, hooks/coord_pre_bash.py, tests/test_proveniencia.py, tests/test_entrypoints.py, tools/ensaio/resultado.md
+- Notas: quatro defeitos achados pelo ensaio T-013 com sessoes reais, nenhum por teste. (1) commit com PATHSPEC explicito sem interseccao com claim de peer viva vira `warn` -- antes `git add <arquivo proprio> && git commit` recebia o mesmo deny de `commit -am`, punindo quem fazia certo; o pathspec ignora o indice, entao e seguro por CONSTRUCAO e nao depende de medir estado compartilhado que expira em segundos (`-a` anula, `push` segue deny). (2) a razao do deny prescrevia duas saidas inexecutaveis -- "finalize numa branch propria" nao destrava (a condicao e peer-viva-no-repo) e "aguarde a peer liberar" nao e mecanismo (peer nao levanta gate do usuario); uma sessao gastou dois turnos descobrindo isso. Agora a razao nomeia o destravamento real: levar ao Vinicius, que roda por `!`. (3) o aviso pedia "mande SendMessage ANTES de editar", impossivel de cumprir porque o `additionalContext` de PreToolUse que nao bloqueia chega JUNTO com o resultado da ferramenta -- texto reescrito no passado. (4) peer na HOME contava como "no mesmo repositorio" (corrigido durante o ensaio). Produtor testado no entrypoint, nao so o consumidor em `policy` -- o buraco que ja tinha mordido AC-007 e AC-010.
 
 ## T-014 — Fechamento mecânico [concluida]
 - Refs: AC-001, AC-002, AC-003, AC-004, AC-005, AC-006, AC-007, AC-008, AC-009, AC-010, AC-011, AC-012, AC-013, AC-014, AC-015, AC-016, AC-017

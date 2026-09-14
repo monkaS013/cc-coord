@@ -880,6 +880,90 @@ class TestCommitAlheioCitadoNaRazao(_AmbienteTemporario):
 # ---------------------------------------------------------------------------
 
 
+class TestCommitSeletivoNoEntrypoint(_AmbienteTemporario):
+    """O PRODUTOR de `commit_seletivo_seguro`, não só o consumidor.
+
+    `policy` já sabe decidir com a flag; se nenhum entrypoint a calcular, o
+    critério fica verde e inerte — foi o que aconteceu com AC-007 e AC-010
+    neste mesmo projeto, duas vezes. Aqui roda o hook de verdade.
+    """
+
+    def _peer_viva_no_repo(self, repo):
+        pid_vivo = os.getpid()
+        _write_session_file(
+            self.sessions_dir,
+            pid_vivo,
+            {
+                "pid": pid_vivo,
+                "sessionId": "sessao-peer",
+                "cwd": repo,
+                "procStart": "",
+                "status": "busy",
+                "updatedAt": int(time.time() * 1000),
+            },
+        )
+
+    def _decidir(self, comando, repo):
+        codigo, saida = self.run_hook(
+            "coord_pre_bash.py",
+            {
+                "hook_event_name": "PreToolUse",
+                "session_id": "sessao-eu",
+                "tool_name": "Bash",
+                "tool_input": {"command": comando},
+                "cwd": repo,
+            },
+        )
+        self.assertEqual(codigo, 0)
+        return (_unica_linha_json(saida).get("hookSpecificOutput") or {}), saida
+
+    def test_commit_com_pathspec_proprio_nao_e_recusado(self):
+        "@spec:AC-007 commit seletivo de arquivo sem claim alheio sai como aviso, no hook real"
+        repo = os.path.join(self._tmp.name, "repo")
+        os.makedirs(repo, exist_ok=True)
+        self._peer_viva_no_repo(repo)
+        hso, saida = self._decidir('git commit notas_b.txt -m "trabalho da B"', repo)
+        self.assertNotEqual(
+            hso.get("permissionDecision"),
+            "deny",
+            f"commit seletivo de arquivo proprio nao pode ser punido igual ao -am: {saida!r}",
+        )
+
+    def test_commit_de_arquivo_com_claim_de_peer_continua_recusado(self):
+        "@spec:AC-007 pathspec que TEM claim de peer viva segue deny (não-vacuidade)"
+        repo = os.path.join(self._tmp.name, "repo2")
+        os.makedirs(repo, exist_ok=True)
+        self._peer_viva_no_repo(repo)
+        alvo = os.path.join(repo, "notas.txt")
+        with open(alvo, "w", encoding="utf-8") as fh:
+            fh.write("wip da peer\n")
+        from ccoord.classify import _path_to_id
+
+        rid, path = _path_to_id("file", alvo, repo)
+        dono = claims.Owner(
+            session_id="sessao-peer", pid=os.getpid(), proc_start="", name="peer-1"
+        )
+        self.assertTrue(claims.claim(rid, dono, ttl_s=3600, meta={"path": path}).ok)
+        hso, saida = self._decidir('git commit notas.txt -m "levando o wip dela"', repo)
+        self.assertEqual(
+            hso.get("permissionDecision"),
+            "deny",
+            f"commitar arquivo COM claim de peer viva tem de ser recusado: {saida!r}",
+        )
+
+    def test_commit_am_continua_recusado(self):
+        "@spec:AC-007 `-am` com peer viva segue deny mesmo com caminho no comando"
+        repo = os.path.join(self._tmp.name, "repo3")
+        os.makedirs(repo, exist_ok=True)
+        self._peer_viva_no_repo(repo)
+        hso, saida = self._decidir('git commit -am "varre tudo" notas_b.txt', repo)
+        self.assertEqual(
+            hso.get("permissionDecision"),
+            "deny",
+            f"-a varre o tracked inteiro; pathspec junto nao torna seletivo: {saida!r}",
+        )
+
+
 class TestProvenienciaDoKillNoEntrypoint(_AmbienteTemporario):
     """T-020 no CAMINHO REAL, nao so no `policy`.
 

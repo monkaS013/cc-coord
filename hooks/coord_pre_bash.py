@@ -300,6 +300,33 @@ def _construir_decisor(hookio, sessions, claims, classify, policy, carimbos):
                     contexto["commits_alheios"] = _commits_alheios(
                         recurso.path or recurso.id
                     )
+                    # Commit com pathspec explicito (T-013): se nenhum dos
+                    # caminhos tem claim de peer viva, e commit seletivo seguro
+                    # -- o pathspec ignora o indice, entao nada da peer vai
+                    # junto. Consumidor ja existe em `policy`; aqui e o
+                    # PRODUTOR, que e o que faltava nos AC-007/AC-010 e nao
+                    # pode faltar de novo.
+                    if recurso.action == "commit":
+                        alvos = classify.pathspecs_de_commit(
+                            tool_input.get("command") or ""
+                        )
+                        if alvos:
+                            cwd_repo = recurso.path or cwd
+                            ids = []
+                            for alvo in alvos:
+                                rid, _p = classify._path_to_id("file", alvo, cwd_repo)
+                                ids.append((alvo, rid))
+                            algum_alheio = False
+                            for _alvo, rid in ids:
+                                c = claims.owner_of(rid)
+                                if c is not None and c.owner.session_id != (
+                                    dono.session_id if dono is not None else None
+                                ):
+                                    algum_alheio = True
+                                    break
+                            if not algum_alheio:
+                                contexto["commit_seletivo_seguro"] = True
+                                contexto["pathspecs"] = alvos
             else:
                 # kill: acao momentanea, nunca adquire claim, nunca usa peers.
                 # AC-010 (fail-closed): `owner_of()` degrada em silencio, entao

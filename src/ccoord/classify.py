@@ -429,6 +429,63 @@ _GIT_C_FLAG = re.compile(
 _GIT_WRITE_ACTIONS = ("commit", "push", "reset", "checkout")
 
 
+_GIT_FLAG_COM_VALOR = ("-m", "--message", "-c", "--author", "--date", "-C", "--file", "-F")
+
+
+def pathspecs_de_commit(command: str) -> list:
+    """Caminhos explicitos de um `git commit <caminho> [...]`, ou [] se nao houver.
+
+    Por que isto existe (ensaio T-013, 12/09): `git commit <caminho> -m "..."`
+    commita **so** aquele caminho e IGNORA o indice -- medido com `A b.txt`
+    staged, `git commit a.txt` levou so o a.txt e deixou o b.txt intacto. Em
+    arvore compartilhada isso e seguranca por CONSTRUCAO, diferente de "conferi
+    o indice e estava limpo", que expira em segundos com peer viva (a peer pode
+    dar `add` entre o check do hook e o commit).
+
+    Devolve [] quando o commit e sem pathspec (`git commit -m`, `git commit -am`)
+    -- esse e o caso perigoso, porque leva o que estiver no indice, que e
+    compartilhado. Tambem devolve [] para `-a`/`--all` mesmo com caminho junto:
+    o `-a` varre tudo que esta tracked, e a presenca do pathspec nao desfaz isso.
+    """
+    m = re.search(r"\bgit\b(?:\s+-C\s+\S+)?\s+commit\b(.*)", command, re.IGNORECASE)
+    if not m:
+        return []
+    resto = m.group(1)
+    # corta em separador de comando: `&&`, `;`, `|`
+    resto = re.split(r"&&|\|\||[;|]", resto)[0]
+
+    # `split()` cru quebraria `-m "trabalho da B"` em tres tokens e as palavras
+    # da mensagem virariam "caminhos". `posix=False` mantem as aspas no token
+    # (removidas abaixo) e nao trata `\` como escape, que e o que se quer em
+    # caminho do Windows.
+    try:
+        import shlex
+
+        tokens = shlex.split(resto, posix=False)
+    except ValueError:  # aspas nao fechadas: melhor tratar como sem pathspec
+        return []
+    caminhos = []
+    pular = False
+    for tok in tokens:
+        if pular:
+            pular = False
+            continue
+        if tok.startswith("-"):
+            base = tok.split("=", 1)[0].lower()
+            if base in _GIT_FLAG_COM_VALOR and "=" not in tok:
+                pular = True
+            # `-a`, `-am`, `--all`: indice implicito, pathspec nao salva
+            if base in ("-a", "--all") or (
+                re.fullmatch(r"-[a-z]+", base) and "a" in base[1:]
+            ):
+                return []
+            continue
+        limpo = tok.strip("\"'")
+        if limpo:
+            caminhos.append(limpo)
+    return caminhos
+
+
 def _detectar_git(command: str, cwd: str):
     if not _GIT_TRIGGER.search(command):
         return []

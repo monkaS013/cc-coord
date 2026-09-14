@@ -12,7 +12,7 @@ de `grep` no transcript JSONL ou do estado em disco — nunca de perguntar à se
 | 4 | Kill de processo com claim de peer viva (AC-003/AC-009) | **PASS** |
 | 5 | `git commit` com peer viva, citando o hash (AC-007) | **PASS** |
 | 6 | Mudança externa + contraprova do eco (AC-016/AC-015) | **PASS** |
-| 7 | Fila do recurso (SendMessage + `notify_when_idle`) | **PARCIAL** |
+| 7 | Fila do recurso (SendMessage + `notify_when_idle`) | **PASS, com desfecho diferente do previsto** |
 | 8 | Degradação com estado corrompido (AC-010) | **PASS** |
 
 ## O que o ensaio achou que 233 testes e 17/17 ACs não acharam
@@ -64,9 +64,27 @@ processo, não lê texto, porque `exit 1` faria a razão aparecer e a ação pas
 **C6 — sensor.** Mudança externa gera 1 carimbo em `changed/`; a escrita da própria sessão gera 0.
 As duas metades juntas — sem a contraprova, um sensor que avisasse sobre tudo passaria por acidente.
 
-**C7 — fila do recurso: PARCIAL.** A negociação por `SendMessage` aconteceu **espontaneamente duas
-vezes** (C2 e C4), que é o passo difícil. O ciclo completo do §8 da spec — a dona encerra e a
-sessão que esperava adquire a lease — não foi executado: exige duas sessões interativas simultâneas.
+**C7 — fila do recurso: PASS, e o desfecho derruba parte do §8 da spec.** A negociação por
+`SendMessage` aconteceu **espontaneamente três vezes**, que era o passo difícil. Mas o destravamento
+**não veio da fila entre peers** — veio do Vinicius. Sequência medida, mesma condição em todas
+(peer viva no repo):
+
+1. `git commit -m` pela sessão, índice só com o arquivo dela → **deny**
+2. `git switch -c b/trabalho-da-b` + `git commit -m` → **deny de novo**, com a razão repetindo
+   "finalize numa branch propria" (a condição é peer-viva-no-repo; branch não entra na conta)
+3. `git commit notas_b.txt -m "trabalho da B"` rodado **pelo Vinicius via `!`** → **passou** (`0b9c47f`)
+
+Resultado verificado: o commit levou só o `notas_b.txt`, `master` intacto em `4df24d0`, WIP da peer
+preservado. **A conclusão de desenho:** peer não libera peer (seria permission laundering, e o gate
+corretamente ignorou a peer dizendo "pode commitar"); quem destrava é o usuário, e o canal é o `!`,
+que não passa pelo `PreToolUse` — o gate cobre a ferramenta Bash da sessão, não o que ele digita.
+Isso é coerente com o desenho (o gate protege contra a sessão agindo sozinha, não contra a decisão
+dele), mas tem o corolário que fica registrado: **nada que dependa de `PreToolUse` protege o repo
+quando o comando vem por `!`**. Para cobertura de integridade, a camada é um `pre-push` do Git, que
+roda independentemente de quem digitou.
+
+**O cenário 7 também expôs o pior defeito de texto da feature:** das três saídas que a razão do deny
+oferecia, duas eram inexecutáveis. Uma sessão gastou dois turnos descobrindo isso.
 
 **C8 — degradação.** Com `CCOORD_HOME` apontando para um arquivo: `Edit` segue (fail-open, exit 0,
 silêncio) e `kill` é recusado (fail-closed, exit 0, `deny`).
@@ -81,6 +99,24 @@ silêncio) e `kill` é recusado (fail-closed, exit 0, `deny`).
 - **O modelo é testemunha não confiável, confirmado de novo.** A sessão B afirmou "nenhum aviso
   apareceu" num caso em que o aviso estava no transcript, e afirmou ter sido bloqueada num caso em
   que o gate nem chegou a rodar.
+
+## Corrigido depois do ensaio (T-021)
+
+Quatro defeitos que só o uso expôs, todos da mesma família — **o gate atrapalhando quem faz certo**:
+
+1. **Commit seletivo era punido igual a `commit -am`.** `git add <arquivo próprio> && git commit`
+   recebia o mesmo deny. Agora: commit com **pathspec explícito** e sem interseção com claim de peer
+   viva → aviso. O pathspec ignora o índice, então é seguro por construção — não depende de medir o
+   índice, que é compartilhado e expira em segundos. `-a`/`--all` anula o pathspec e segue recusado;
+   `push` segue recusado, porque lá o risco é outro (levar commit alheio).
+2. **A razão do deny prescrevia o inexecutável.** Saiu "finalize numa branch própria" (não destrava)
+   e "aguarde a peer liberar" (peer não levanta gate). Entrou o caminho que funciona: levar as duas
+   saídas ao Vinicius, e ele rodar por `!` se autorizar.
+3. **O aviso pedia ação prévia impossível.** "Mande SendMessage **antes** de editar" — mas o
+   `additionalContext` de um `PreToolUse` que não bloqueia chega junto com o resultado da ferramenta.
+   Quando a sessão lê, já editou. Agora o texto está no passado e pede o aviso **agora**.
+4. **Peer na HOME contava como "no mesmo repositório"** — uma sessão ociosa na home bloqueava commit
+   e push de qualquer repo da máquina. (Corrigido antes, durante o próprio ensaio.)
 
 ## Pendente
 
