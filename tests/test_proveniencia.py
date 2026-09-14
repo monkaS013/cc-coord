@@ -270,6 +270,85 @@ class TestPeerNaHomeNaoBloqueiaRepo(unittest.TestCase):
         self.assertEqual(d.verdict, "allow")
 
 
+class TestCommitSeletivoNaoEPunido(unittest.TestCase):
+    """Achado do ensaio T-013 (12/09): o gate punia quem fazia certo.
+
+    `git add <arquivo próprio> && git commit` recebia o mesmo deny de
+    `git commit -am`. Quem se deu ao trabalho de ser seletivo era tratado igual
+    a quem varre o WIP alheio, e o único caminho que sobrava era ignorar o gate.
+    """
+
+    def _commit(self, contexto):
+        return policy.decide(
+            Resource(kind="git", id="git:repo", path=r"C:\dev\repo", action="commit"),
+            owner=None,
+            me=_SessaoFalsa(session_id="eu", cwd=r"C:\dev\repo"),
+            peers=[_SessaoFalsa(session_id="peer-1", name="peer-viva", cwd=r"C:\dev\repo")],
+            contexto=contexto,
+        )
+
+    def test_commit_com_pathspec_sem_claim_alheio_vira_aviso(self):
+        "@spec:AC-007 commit seletivo sem interseção com claim de peer vira warn, não deny"
+        d = self._commit({"commit_seletivo_seguro": True, "pathspecs": ["notas_b.txt"]})
+        self.assertEqual(d.verdict, "warn")
+        self.assertIn("notas_b.txt", d.reason)
+
+    def test_commit_sem_pathspec_continua_deny(self):
+        "@spec:AC-007 commit de índice implícito com peer viva segue deny (não-vacuidade)"
+        self.assertEqual(self._commit({}).verdict, "deny")
+
+    def test_push_nunca_vira_aviso_por_pathspec(self):
+        "@spec:AC-007 push com peer viva segue deny: o risco dele é levar commit alheio"
+        d = policy.decide(
+            Resource(kind="git", id="git:repo", path=r"C:\dev\repo", action="push"),
+            owner=None,
+            me=_SessaoFalsa(session_id="eu", cwd=r"C:\dev\repo"),
+            peers=[_SessaoFalsa(session_id="peer-1", name="peer-viva", cwd=r"C:\dev\repo")],
+            contexto={"commit_seletivo_seguro": True, "pathspecs": ["x.txt"]},
+        )
+        self.assertEqual(d.verdict, "deny")
+
+    def test_razao_do_deny_nao_oferece_saida_inexecutavel(self):
+        "@spec:AC-007 a razão não manda 'finalize numa branch própria' nem 'aguarde a peer liberar'"
+        # Medido no ensaio: a sessão criou a branch, remediu o índice e tomou o
+        # SEGUNDO deny com a mesma sugestão. Razão que prescreve o inexecutável
+        # gasta turno e corrói a confiança que faz a sessão não contornar.
+        razao = self._commit({}).reason.lower()
+        self.assertNotIn("branch propria", razao)
+        self.assertNotIn("aguarde ela liberar", razao)
+        self.assertIn("vinicius", razao)
+        self.assertIn("!", razao, "a razão tem de nomear o destravamento real: ele rodar por `!`")
+
+
+class TestPathspecDeCommit(unittest.TestCase):
+    def _alvos(self, comando):
+        from ccoord.classify import pathspecs_de_commit
+
+        return pathspecs_de_commit(comando)
+
+    def test_pathspec_explicito_e_reconhecido(self):
+        "@spec:AC-007 `git commit <caminho> -m` expõe o caminho"
+        self.assertEqual(self._alvos('git commit notas_b.txt -m "trabalho da B"'), ["notas_b.txt"])
+        self.assertEqual(self._alvos('git commit -m "msg" a.txt'), ["a.txt"])
+
+    def test_commit_sem_caminho_nao_tem_pathspec(self):
+        "@spec:AC-007 commit de índice implícito não tem pathspec (é o caso perigoso)"
+        self.assertEqual(self._alvos('git commit -m "msg"'), [])
+
+    def test_dash_a_anula_o_pathspec(self):
+        "@spec:AC-007 `-a` varre tudo que está tracked: pathspec junto não salva"
+        # Sem esta regra, `git commit -am "x" arquivo.txt` seria lido como
+        # seletivo e liberado, levando o WIP da peer junto.
+        for comando in ('git commit -am "x"', 'git commit -a -m "x" a.txt', 'git commit --all -m "x"'):
+            with self.subTest(comando=comando):
+                self.assertEqual(self._alvos(comando), [])
+
+    def test_argumento_de_flag_nao_vira_caminho(self):
+        "@spec:AC-007 o texto de -m não pode ser confundido com caminho (não-vacuidade)"
+        self.assertEqual(self._alvos("git commit -m msg"), [])
+        self.assertEqual(self._alvos('git -C C:/dev/repo commit -m "x" a.txt'), ["a.txt"])
+
+
 class TestAvisoDeHookDesatualizado(unittest.TestCase):
     """Protecao contra o falso verde que me pegou em 12/09.
 

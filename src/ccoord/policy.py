@@ -293,6 +293,23 @@ def _decidir_git_escrita(resource: Resource, me: Optional[Session], peers: list,
     nomes = ", ".join(sorted({_nome_peer_seguro(p) for p in peers_no_repo}))
     commits = [str(c) for c in (contexto.get("commits_alheios") or [])]
 
+    # Commit com PATHSPEC explicito e sem interseccao com claim de peer viva:
+    # aviso, nao recusa. O gate antigo tratava `git add <arquivo proprio> &&
+    # git commit` igual a `git commit -am` -- punia quem fazia certo, e o unico
+    # caminho que sobrava era ignorar o gate (achado do ensaio T-013).
+    # Seguranca por construcao: o pathspec ignora o indice, entao nao ha janela
+    # para a peer entrar entre o check e o commit.
+    if resource.action == "commit" and contexto.get("commit_seletivo_seguro"):
+        alvos = ", ".join(str(p) for p in (contexto.get("pathspecs") or [])) or "o caminho indicado"
+        razao = (
+            f"AVISO: {nomes} tem sessao viva em {resource.path}, mas este commit "
+            f"e seletivo ({alvos}) e nenhum desses caminhos tem claim dela. O "
+            "pathspec ignora o indice, entao o que ela tiver em staging nao vai "
+            "junto. Segue liberado; confira a mensagem do commit e nao rode "
+            "`git push` sem falar com o Vinicius — o push leva commits dela."
+        )
+        return Decision("warn", _trunca_razao(razao), "info", resource.id, nomes)
+
     partes = [
         f"DENY: git {resource.action} recusado em {resource.path} — {nomes} tem "
         "sessao viva neste mesmo repositorio."
@@ -301,10 +318,27 @@ def _decidir_git_escrita(resource: Resource, me: Optional[Session], peers: list,
         partes.append("Commit(s) alheio(s) no intervalo local: " + "; ".join(commits) + ".")
     partes.append(
         "Rode `git --no-optional-locks log origin/<branch>..HEAD` e "
-        "`git status --short` (2 colunas) e leve as duas saidas ao Vinicius "
-        "antes de declarar o commit seguro."
+        "`git status --short` (2 colunas) e leve as duas saidas ao Vinicius: "
+        "se ele autorizar, ELE mesmo roda o comando por `!` no prompt, que e o "
+        "unico destravamento real (o gate cobre a ferramenta Bash da sessao, "
+        "nao o que ele digita)."
     )
-    partes.append(f"Alternativa: avise {nomes} por SendMessage e aguarde ela liberar, ou finalize numa branch propria.")
+    # As duas "alternativas" que este texto oferecia antes NAO funcionavam, e o
+    # ensaio T-013 mediu o custo disso: a sessao barrada criou `b/trabalho-da-b`,
+    # remediu o indice e tomou o SEGUNDO deny, com a razao repetindo "finalize
+    # numa branch propria" -- a condicao e peer-viva-no-repo, e branch nao entra
+    # na conta. "Aguarde a peer liberar" tambem nao e mecanismo: a peer chegou a
+    # dizer "pode commitar" e o gate seguiu barrando, o que esta CERTO (peer nao
+    # levanta gate do usuario, seria permission laundering) -- mas entao nao
+    # pode ser oferecido como saida. Razao prescritiva que prescreve o
+    # inexecutavel e pior que recusa seca: gasta turno e corroi a confianca que
+    # faz a sessao nao contornar o gate.
+    partes.append(
+        f"Avisar {nomes} por SendMessage serve para ela saber, nao para "
+        "liberar: peer nao levanta gate. Trocar a forma do comando para passar "
+        "e contorno, mesmo que a forma nova seja melhor -- a forma melhor entra "
+        "pela politica, com o Vinicius, nao dentro deste turno."
+    )
     razao = " ".join(partes)
     return Decision("deny", _trunca_razao(razao), "forte", resource.id, nomes)
 
@@ -406,10 +440,16 @@ def _decidir_arquivo(resource: Resource, owner: Optional[Claim], me: Optional[Se
     # Edit
     sobrepoe = _ranges_overlap(resource.lines, owner.range)
     if sobrepoe:
+        # Texto no PASSADO de proposito: o `additionalContext` de um PreToolUse
+        # que nao bloqueia chega ao modelo JUNTO com o resultado da ferramenta,
+        # nunca antes dela (medido 12/09). "Avise antes de editar" e impossivel
+        # de cumprir na primeira tentativa -- quando eu leio, ja editei. Aviso
+        # informa; quem ordena e o deny.
         razao = (
-            f"AVISO: Edit em {resource.path} colide com {faixa_txt} de {dono}. "
-            f"Mande SendMessage para {dono} antes de editar para nao pisar no "
-            "trabalho dela."
+            f"AVISO: a edicao em {resource.path} colide com {faixa_txt} de {dono}. "
+            f"Ja foi aplicada — mande SendMessage para {dono} AGORA dizendo o que "
+            "voce tocou (arquivo, faixa, se foi Edit pontual ou reescrita), para "
+            "ela conferir se algo dela se perdeu."
         )
         return Decision("warn", _trunca_razao(razao), "info", resource.id, dono)
 
