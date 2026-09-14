@@ -270,6 +270,24 @@ def _decidir_kill(
     me: Optional[Session],
     pedido_pelo_usuario: bool = False,
 ) -> Decision:
+    if resource.id == "process:alvo-nao-identificado":
+        # Fail-closed simetrico ao de estado ilegivel: ali nao da para saber DE
+        # QUEM e o processo, aqui nao da para saber QUAL processo e. Nos dois, a
+        # unica resposta segura para uma acao irreversivel e recusar — liberar
+        # seria decidir no escuro. Achado ALTA da 5a auditoria (14/09): antes
+        # este caso virava `process:desconhecido`, que nunca casa com claim
+        # nenhum, entao escrever o comando de forma que o parser nao entendesse
+        # era o jeito mais facil de matar processo de peer viva.
+        razao = (
+            "DENY: nao consegui identificar QUAL processo este comando mata, "
+            "entao nao da para saber se ele pertence a uma sessao viva. Kill e "
+            "irreversivel: recuso por ignorancia, nao por evidencia. Torne o "
+            "alvo explicito (`taskkill /F /PID <n>` ou `Stop-Process -Name "
+            "<nome>`) e rode de novo, ou leve o comando ao Vinicius — se ele "
+            "autorizar, ele mesmo roda por `!`."
+        )
+        return Decision("deny", _trunca_razao(razao), "forte", resource.id, None)
+
     if owner is None:
         return _allow(resource, None)
 

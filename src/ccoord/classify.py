@@ -312,11 +312,25 @@ _KILL_TRIGGER = re.compile(
     # e o atrito que esta feature existe para evitar.
     r"(\b(taskkill|tskill|pskill|pkill|kill|stop-process|spps)\b"
     r"|\bwmic\b[^|;&]*\b(terminate|delete)\b"  # wmic ... call terminate | delete
+    # CIM/WMI moderno — achado ALTA da 5a auditoria (14/09). `wmic` esta
+    # DEPRECADO no Windows 11; o caminho atual e
+    # `Get-CimInstance Win32_Process | Invoke-CimMethod -MethodName Terminate`
+    # (ou o `Get-WmiObject ... .Terminate()` antigo). Nao e exotico: o proprio
+    # projeto usa `Get-CimInstance Win32_Process` como jeito padrao de CONTAR
+    # processo, entao era o idioma mais provavel de aparecer num kill.
+    r"|\binvoke-cimmethod\b[^|;&]*\bterminate\b"
+    r"|\bget-(cim|wmi)(instance|object)\b[^|;&]*\bterminate\b"
+    r"|\.terminate\(\)"
+    r"|\.kill\(\)"  # (Get-Process x).Kill() — mesma familia, sem verbo de kill
     r")",
     re.IGNORECASE,
 )
 
 _KILL_TARGET_PATTERNS = (
+    # `-Filter "Name='chrome.exe'"` do CIM/WMI: o alvo vive dentro do filtro, não
+    # numa flag. Sem isto o kill por CIM caía no fail-closed genérico — protegido,
+    # mas sem poder dizer QUEM perde o processo, que é metade do valor do aviso.
+    re.compile(r"\bname\s*=\s*['\"]([^'\"]+)['\"]", re.IGNORECASE),
     re.compile(r"/im\s+\"?([^\"\s]+)\"?", re.IGNORECASE),
     re.compile(r"-name\s+\"?([^\"\s,]+)\"?", re.IGNORECASE),
     re.compile(r"/pid\s+(\d+)", re.IGNORECASE),
@@ -386,12 +400,33 @@ def _candidatos_wildcard(alvo_lower: str) -> list:
     return [nome for nome in _BROWSER_EXECUTAVEIS if padrao.match(nome)]
 
 
+# `Get-Process chrome | Stop-Process`, `(Get-Process chrome).Kill()` — o idioma
+# mais comum de PowerShell para matar processo por nome, e o que a 5a auditoria
+# (14/09) reproduziu saindo LIBERADO: `_extrair_alvo_kill` nao achava alvo, o
+# recurso virava `process:desconhecido`, esse id nunca casa com o claim real
+# (`browser:chrome`), `owner_of` devolvia None = "livre" e o kill passava. O nome
+# esta no `Get-Process`, nao no verbo de kill — por isso e extraido a parte.
+_GET_PROCESS_NOME = re.compile(
+    r"\bget-process\b\s+(?:-name\s+)?[\"']?([\w.*?-]+)[\"']?", re.IGNORECASE
+)
+
+
 def _detectar_kill(command: str):
     if not _KILL_TRIGGER.search(command):
         return []
     alvo = _extrair_alvo_kill(command)
     if alvo is None:
-        return [Resource(kind="process", id="process:desconhecido", action="kill")]
+        m = _GET_PROCESS_NOME.search(command)
+        if m:
+            alvo = m.group(1)
+    if alvo is None:
+        # FAIL-CLOSED. Antes isto virava `process:desconhecido`, um id que nao
+        # casa com claim nenhum — ou seja, a forma mais facil de matar processo
+        # de peer viva era escrever o comando de um jeito que o parser nao
+        # entendesse. Kill e irreversivel: quando nao da para dizer O QUE morre,
+        # a resposta honesta e recusar e mandar perguntar, nao liberar por
+        # ignorancia. O id sentinela e reconhecido pela politica.
+        return [Resource(kind="process", id="process:alvo-nao-identificado", action="kill")]
     alvo_lower = alvo.lower()
 
     candidatos = _candidatos_wildcard(alvo_lower)
@@ -880,8 +915,42 @@ def _detectar_copia_move(command: str, cwd: str) -> list:
     return resources
 
 
+# `cmd /c "..."`, `powershell -Command "..."`, `bash -c '...'` — achado ALTA da
+# 5a auditoria (14/09): o comando de DENTRO do subshell escapava de tudo. Sem
+# isto, `powershell -Command "Get-Date > compartilhado.txt"` escrevia num arquivo
+# com claim de peer viva em silencio, enquanto o MESMO comando sem o involucro
+# era detectado certo — ou seja, bastava embrulhar para furar o gate.
+_SUBSHELL = re.compile(
+    r"\b(?:cmd(?:\.exe)?\s+/[ck]"
+    r"|(?:powershell|pwsh)(?:\.exe)?\s+(?:-\w+\s+)*-c(?:ommand)?"
+    r"|(?:bash|sh)\s+-c)\s+"
+    r"(\"([^\"]*)\"|'([^']*)')",
+    re.IGNORECASE,
+)
+
+
+def _comandos_internos(command: str) -> list:
+    """Conteudo dos subshells (`cmd /c \"...\"`, `bash -c '...'`) do comando."""
+    internos = []
+    for m in _SUBSHELL.finditer(command):
+        interno = m.group(2) if m.group(2) is not None else m.group(3)
+        if interno and interno.strip():
+            internos.append(interno)
+    return internos
+
+
 def _detectar_escrita_bash(command: str, cwd: str) -> list:
     achados = []
+    # O miolo do subshell passa pelos MESMOS detectores. Recursao de um nivel
+    # so: `bash -c "cmd /c ..."` aninhado fica de fora, limitacao consciente —
+    # cada nivel a mais multiplica o risco de falso positivo em texto que apenas
+    # PARECE comando.
+    for interno in _comandos_internos(command):
+        achados.extend(_detectar_redirecionamento(interno, cwd))
+        achados.extend(_detectar_sed_inplace(interno, cwd))
+        achados.extend(_detectar_escrita_powershell(interno, cwd))
+        achados.extend(_detectar_tee(interno, cwd))
+        achados.extend(_detectar_copia_move(interno, cwd))
     achados.extend(_detectar_redirecionamento(command, cwd))
     achados.extend(_detectar_sed_inplace(command, cwd))
     achados.extend(_detectar_escrita_powershell(command, cwd))
