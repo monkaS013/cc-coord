@@ -221,7 +221,7 @@ class _AmbienteTemporario(unittest.TestCase):
 
 class TestMergePreservaTerceiros(_AmbienteTemporario):
     def test_merge_preserva_todos_os_hooks_alheios(self):
-        "@spec:AC-012 instalacao acrescenta os 7 hooks do cc-coord e preserva os hooks de terceiros ja em uso"
+        "@spec:AC-012 instalacao acrescenta os 8 hooks do cc-coord e preserva os hooks de terceiros ja em uso"
         original = _settings_real_fixture()
         self._escrever_settings(original)
 
@@ -299,18 +299,18 @@ class TestMergePreservaTerceiros(_AmbienteTemporario):
 
 class TestIdempotencia(_AmbienteTemporario):
     def test_instalar_duas_vezes_nao_duplica_nenhum_hook(self):
-        "instalar duas vezes seguidas nao duplica nenhum dos 7 hooks do cc-coord"
+        "instalar duas vezes seguidas nao duplica nenhum dos 8 hooks do cc-coord"
         self._escrever_settings(_settings_real_fixture())
 
         r1 = install.instalar(self.destino, self.repo, dry_run=False)
         self.assertTrue(r1.ok, r1.erro)
-        self.assertEqual(len(r1.hooks_adicionados), 7)
+        self.assertEqual(len(r1.hooks_adicionados), 8)
         self.assertEqual(len(r1.hooks_ja_presentes), 0)
 
         r2 = install.instalar(self.destino, self.repo, dry_run=False)
         self.assertTrue(r2.ok, r2.erro)
         self.assertEqual(len(r2.hooks_adicionados), 0, "segunda instalacao nao deveria adicionar nada de novo")
-        self.assertEqual(len(r2.hooks_ja_presentes), 7)
+        self.assertEqual(len(r2.hooks_ja_presentes), 8)
 
         pos = self._ler_settings()
         for spec in install.HOOKS_SPECS:
@@ -430,7 +430,7 @@ class TestJsonInvalidoAborta(_AmbienteTemporario):
 
 class TestDesinstalar(_AmbienteTemporario):
     def test_desinstalar_remove_so_os_hooks_do_cc_coord(self):
-        "desinstalar remove os 7 hooks do cc-coord e deixa os hooks de terceiros, no mesmo evento/matcher, intactos"
+        "desinstalar remove os 8 hooks do cc-coord e deixa os hooks de terceiros, no mesmo evento/matcher, intactos"
         original = _settings_real_fixture()
         self._escrever_settings(original)
         r_install = install.instalar(self.destino, self.repo, dry_run=False)
@@ -438,7 +438,7 @@ class TestDesinstalar(_AmbienteTemporario):
 
         r_uninstall = install.desinstalar(self.destino)
         self.assertTrue(r_uninstall.ok, r_uninstall.erro)
-        self.assertEqual(len(r_uninstall.hooks_removidos), 7)
+        self.assertEqual(len(r_uninstall.hooks_removidos), 8)
 
         pos = self._ler_settings()
 
@@ -456,7 +456,7 @@ class TestDesinstalar(_AmbienteTemporario):
         for nome in terceiros_esperados:
             self.assertIn(nome, texto_pos, f"desinstalar removeu hook de terceiro {nome}")
 
-        # nenhum dos 7 scripts do cc-coord sobrou no settings.json
+        # nenhum dos 8 scripts do cc-coord sobrou no settings.json
         for spec in install.HOOKS_SPECS:
             self.assertEqual(self._contar_nossos(pos, spec["script"]), 0, f"{spec['script']} nao foi removido")
 
@@ -498,7 +498,7 @@ class TestDesinstalar(_AmbienteTemporario):
         sucesso (a docstring do modulo promete Relatorio sempre, inclusive
         em falha). Alem de nao propagar, a limpeza dos entrypoints/regra tem
         de ser pulada: se settings.json nao foi atualizado, ele ainda
-        referencia os 7 scripts -- apaga-los criaria o mesmo settings.json
+        referencia os 8 scripts -- apaga-los criaria o mesmo settings.json
         apontando para hook inexistente do achado 2, so que pelo caminho do
         uninstall."""
         from unittest import mock
@@ -532,7 +532,7 @@ class TestDesinstalar(_AmbienteTemporario):
 
 class TestDryRun(_AmbienteTemporario):
     def test_dry_run_nao_altera_settings_nem_cria_backup_ou_copia_arquivos(self):
-        "@spec:AC-012 --dry-run relata os 7 hooks que entrariam mas nao escreve nada em disco"
+        "@spec:AC-012 --dry-run relata os 8 hooks que entrariam mas nao escreve nada em disco"
         original = _settings_real_fixture()
         caminho_settings = self._escrever_settings(original)
         mtime_antes = os.path.getmtime(caminho_settings)
@@ -543,7 +543,7 @@ class TestDryRun(_AmbienteTemporario):
 
         self.assertTrue(relatorio.ok, relatorio.erro)
         self.assertTrue(relatorio.dry_run)
-        self.assertEqual(len(relatorio.hooks_adicionados), 7)
+        self.assertEqual(len(relatorio.hooks_adicionados), 8)
 
         # nada mudou no disco
         with open(caminho_settings, "r", encoding="utf-8") as fh:
@@ -554,7 +554,7 @@ class TestDryRun(_AmbienteTemporario):
         # nenhum backup, nenhum hooks/ ou rules/ criado no destino
         self.assertEqual(sorted(os.listdir(self.destino)), ["settings.json"])
 
-        # a saida textual e legivel e cita os 7 hooks, os eventos e o backup previsto
+        # a saida textual e legivel e cita os 8 hooks, os eventos e o backup previsto
         texto = relatorio.to_text()
         self.assertIn("DRY-RUN", texto)
         self.assertIn("coord_session_start.py", texto)
@@ -591,7 +591,7 @@ class TestInterpretadorAbsoluto(_AmbienteTemporario):
         momento em que o HARNESS invoca o hook via bash -c, nao no momento
         deste instalar() -- trocar/reinstalar o Python ou uma distribuicao
         (Anaconda) empurrando seu proprio 'python' na frente do PATH quebra
-        os 7 hooks ao mesmo tempo, com o kill de peer saindo liberado mesmo
+        os 8 hooks ao mesmo tempo, com o kill de peer saindo liberado mesmo
         assim (falha no bash, antes do try/except do proprio entrypoint)."""
         self._escrever_settings(_settings_real_fixture())
         relatorio = install.instalar(self.destino, self.repo, dry_run=False)
