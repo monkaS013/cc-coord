@@ -922,6 +922,55 @@ def _classify_bash(tool_input: dict, cwd: str):
 # Entrada publica
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Browser via MCP — a colisao que ORIGINOU o projeto e a ultima sem cobertura.
+# ---------------------------------------------------------------------------
+
+# O catalogo de colisoes que abriu o cc-coord tem o browser em primeiro lugar:
+# duas sessoes disputando o mesmo perfil do Playwright custaram ao Vinicius dois
+# formularios de candidatura preenchidos. O gate cobria o KILL do processo
+# (AC-003), mas o claim que o kill consulta **nunca era adquirido por ninguem**:
+# os matchers do PreToolUse pegam Edit/Write/NotebookEdit e Bash, e as
+# ferramentas do MCP passam ao largo. Medido em 12/09 no ensaio T-013 — o deny
+# do cenario 4 so funcionou porque eu criei o claim a mao.
+#
+# A unidade de posse e o SERVIDOR MCP (`playwright`, `playwright-b`), nao a aba
+# nem a ferramenta: e o servidor que segura o perfil no disco e devolve
+# "Browser is already in use" para quem chega depois. Por isso o id e
+# `browser:<servidor>`, que e exatamente o que o ramo de kill ja usa.
+_MCP_BROWSER = re.compile(r"^mcp__([\w.-]*(?:playwright|puppeteer|browser)[\w.-]*)__(\w+)$", re.IGNORECASE)
+
+# `browser_close` NAO mata o processo (o MCP o mantem vivo para reaproveitar) —
+# ja registrado como pegadinha. Mas ele MARCA o fim do uso declarado, que e o
+# unico sinal honesto que a sessao emite; por isso vira `release`, e nao um uso
+# a mais.
+_FERRAMENTAS_QUE_LIBERAM = ("browser_close",)
+# Ferramentas de leitura pura nao tomam posse: quem so tira screenshot ou le o
+# console nao esta conduzindo a sessao de navegacao. Sem esta lista, qualquer
+# inspecao criaria claim e a primeira sessao a espiar travaria as outras.
+_FERRAMENTAS_SO_LEITURA = (
+    "browser_console_messages",
+    "browser_network_requests",
+    "browser_take_screenshot",
+    "browser_snapshot",
+    "browser_tabs",
+)
+
+
+def _classify_browser_mcp(tool_name: str):
+    """Ferramenta de browser via MCP -> posse do perfil daquele servidor."""
+    m = _MCP_BROWSER.match(tool_name or "")
+    if not m:
+        return []
+    servidor, ferramenta = m.group(1).lower(), m.group(2).lower()
+    if not ferramenta.startswith("browser_"):
+        return []
+    if ferramenta in _FERRAMENTAS_SO_LEITURA:
+        return []
+    acao = "release" if ferramenta in _FERRAMENTAS_QUE_LIBERAM else "use"
+    return [Resource(kind="browser", id=f"browser:{servidor}", action=acao)]
+
+
 _DISPATCH = {
     "Edit": lambda ti, cwd, ler: _classify_edit(ti, cwd, ler),
     "Write": lambda ti, cwd, ler: _classify_write(ti, cwd),
@@ -946,5 +995,5 @@ def classify(
     tool_input = tool_input or {}
     handler = _DISPATCH.get(tool_name)
     if handler is None:
-        return []
+        return _classify_browser_mcp(tool_name)
     return handler(tool_input, cwd, ler_arquivo)

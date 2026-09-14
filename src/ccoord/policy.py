@@ -222,6 +222,48 @@ def _allow(resource: Resource, dono: Optional[str] = None) -> Decision:
 # ---------------------------------------------------------------------------
 
 
+_OUTRO_PERFIL = {"playwright": "playwright-b", "playwright-b": "playwright"}
+
+
+def _decidir_uso_de_browser(
+    resource: Resource, owner: Optional[Claim], me: Optional[Session]
+) -> Decision:
+    """Usar o browser de um servidor MCP que outra sessao ja detem.
+
+    **Aviso, nunca recusa** — e a diferenca entre esta feature e um lock burro.
+    Duas sessoes no mesmo perfil nao destroem trabalho por si: o que destroi e
+    a segunda tentar resolver o `Browser is already in use` MATANDO o processo
+    (o kill segue recusado, ramo separado). Bloquear a navegacao aqui so faria a
+    sessao ficar sem saida, que e como se aprende a contornar o gate.
+
+    A alternativa tem de ser CONCRETA, senao o aviso e ruido: existem dois
+    servidores configurados nesta maquina (`playwright` e `playwright-b`)
+    justamente para duas sessoes navegarem em paralelo.
+    """
+    servidor = resource.id.split(":", 1)[1] if ":" in resource.id else resource.id
+    if owner is None:
+        return _allow(resource, None)
+    if me is not None and me.session_id is not None and owner.owner.session_id == me.session_id:
+        return _allow(resource, _dono_nome(owner))
+
+    dono = _dono_nome(owner)
+    alternativa = _OUTRO_PERFIL.get(servidor)
+    sugestao = (
+        f"Use o servidor `{alternativa}` em vez de `{servidor}` — os dois existem "
+        "nesta maquina para duas sessoes navegarem ao mesmo tempo."
+        if alternativa
+        else "Use outro servidor/perfil de browser."
+    )
+    razao = (
+        f"AVISO: {dono} esta usando o browser `{servidor}` agora. Se voce abrir, "
+        f"vai receber `Browser is already in use` — e o caminho errado dali e "
+        f"matar o processo (isso derruba o que ela esta fazendo e segue recusado). "
+        f"{sugestao} Se precisar deste perfil especifico, mande SendMessage para "
+        f"{dono} pedindo o `browser_close` e aguarde com notify_when_idle."
+    )
+    return Decision("warn", _trunca_razao(razao), "forte", resource.id, dono)
+
+
 def _decidir_kill(
     resource: Resource,
     owner: Optional[Claim],
@@ -499,6 +541,9 @@ def decide(
             "events.log; nao trava o turno por estado corrompido."
         )
         return Decision("allow", _trunca_razao(razao), "info", resource.id, None)
+
+    if resource.kind == "browser" and resource.action in ("use", "release"):
+        return _decidir_uso_de_browser(resource, owner, me)
 
     if resource.kind in ("process", "browser") and resource.action == "kill":
         # `estado_ilegivel` ja foi tratado acima e vence a proveniencia de

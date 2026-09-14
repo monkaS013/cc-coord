@@ -778,6 +778,39 @@ def release(owner: Owner, scope: str) -> int:
     return removidos
 
 
+def release_resource(resource: str, owner: Owner) -> bool:
+    """Libera UM recurso especifico, se ele ainda for do `owner`. True se saiu.
+
+    `release(owner, scope)` limpa por escopo, o que serve para fim de turno e de
+    sessao. Falta o caso do meio: a sessao declarou que parou de usar UM recurso
+    e continua trabalhando no resto — e o `browser_close` (T-022), que solta o
+    perfil do Playwright sem tocar nos outros claims de sessao. Liberar por
+    escopo ali derrubaria claims que ainda estao em uso.
+
+    Reconfere o dono antes de apagar, pelo mesmo motivo do `release()`: entre a
+    leitura e a remocao, outra sessao pode ter roubado um claim ja expirado, e
+    apagar o claim NOVO dela seria pior que nao liberar nada.
+    """
+    for fpath in _iter_claim_files():
+        c = _read_claim_file(fpath)
+        if c is None or c.resource != resource:
+            continue
+        if not _same_owner_identity(c.owner, owner, casar_agent=True):
+            return False
+        if not _remove_se_ainda_e_o_mesmo(fpath, c):
+            return False
+        _log_event(
+            "release",
+            resource=c.resource,
+            path=c.path,
+            range=list(c.range) if c.range else None,
+            owner=c.owner.to_dict(),
+            scope="resource",
+        )
+        return True
+    return False
+
+
 def sweep(*, esta_vivo: Callable[[Owner], bool] | None = None) -> int:
     """Remove claims de dono morto/expirado; cada remocao vira `steal_stale`."""
     esta_vivo = esta_vivo or esta_vivo_padrao

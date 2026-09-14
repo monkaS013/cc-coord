@@ -105,6 +105,19 @@ HOOKS_SPECS: tuple[dict, ...] = (
         "status_message": "Coordenacao entre sessoes: checando conflito de comando",
     },
     {
+        # A colisao que ORIGINOU o projeto (dois formularios de candidatura
+        # perdidos) e a ultima a ganhar cobertura: sem este matcher, nenhuma
+        # sessao adquire o claim do perfil do browser, e o ramo de kill fica
+        # consultando um dono que nunca existe. Medido no ensaio T-013.
+        # O matcher e regex sobre o nome da ferramenta MCP -- pega `playwright`
+        # e `playwright-b`, os dois servidores configurados nesta maquina.
+        "event": "PreToolUse",
+        "matcher": "mcp__.*(playwright|puppeteer|browser).*__browser_.*",
+        "script": "coord_pre_browser.py",
+        "timeout": 10,
+        "status_message": "Coordenacao entre sessoes: posse do perfil do browser",
+    },
+    {
         "event": "PostToolBatch",
         "matcher": "",
         "script": "coord_post_batch.py",
