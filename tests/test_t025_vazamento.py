@@ -129,8 +129,14 @@ class TestStopLiberaEmReentrada(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(self._claims_em_disco(), [], "claim de turno sobreviveu ao Stop")
 
-    def test_stop_em_reentrada_faz_o_claim_expirar_rapido(self):
-        "@spec:AC-021 reentrada de Stop nao deixa o claim preso: ele passa a expirar em 90s"
+    def test_stop_em_reentrada_nao_mexe_no_claim(self):
+        "@spec:AC-021 reentrada de Stop nao libera nem encurta: o turno nao acabou"
+        # Três versões desta regra em 17/09, a última guiada por medição:
+        # liberar em reentrada apagava as faixas do turno; encurtar o TTL para
+        # 90s liberava o recurso para uma peer com o dono VIVO (o intervalo
+        # real entre duas edições do mesmo recurso tem mediana de 79,4s e passa
+        # de 90s em 48,2% dos casos). Claim de turno vazado não bloqueia
+        # ninguém — expira e o `sweep()` do SessionStart o remove.
         self._tomar_claim()
         rc, saida = _run_hook(
             "coord_stop.py",
@@ -144,14 +150,41 @@ class TestStopLiberaEmReentrada(unittest.TestCase):
         c = _c.owner_of("file:c--dev-x.py")
         self.assertIsNotNone(c, "reentrada apagou o claim — apaga as faixas do turno em andamento")
         restante_s = (c.renewed_at + c.ttl_s * 1000 - _c._now_ms()) / 1000.0
-        self.assertLessEqual(
-            restante_s, 90.0, f"claim segue com TTL longo ({restante_s:.0f}s) — é o vazamento"
+        self.assertGreater(
+            restante_s,
+            300.0,
+            f"o TTL foi encurtado ({restante_s:.0f}s) — isso libera o recurso com o dono vivo",
         )
         # AC-013: silencio no Stop e `{}` (o hookio nunca pode devolver
         # `additionalContext` aqui — foi o que gerou os 10 disparos em cadeia
         # da medicao de 11/09).
         self.assertIn(saida.strip(), ("", "{}"), f"o Stop falou: {saida!r}")
         self.assertNotIn("additionalContext", saida)
+
+    def test_reentrada_nao_libera_recurso_para_peer(self):
+        "@spec:AC-021 com o dono VIVO, peer nao consegue o recurso depois da reentrada"
+        # Controle negativo do achado: a versão com TTL de 90s deixava a peer
+        # tomar o recurso no meio do turno do dono.
+        from ccoord import claims as _c
+
+        self._tomar_claim(sid="dono-vivo")
+        _run_hook(
+            "coord_stop.py",
+            {"hook_event_name": "Stop", "session_id": "dono-vivo", "stop_hook_active": True},
+            self.home,
+            self.sessions,
+        )
+        peer = _c.Owner(
+            session_id="peer", pid=os.getpid(), proc_start="", name="peer", agent_id=None
+        )
+        r = _c.claim(
+            "file:c--dev-x.py",
+            peer,
+            ttl_s=900,
+            meta={"path": r"C:\dev\x.py", "range": None, "scope": "turn", "purpose": "peer"},
+        )
+        self.assertFalse(r.ok, "peer tomou recurso de dono vivo depois da reentrada")
+        self.assertEqual(r.reason, "held_by_peer")
 
     def test_reentrada_preserva_as_faixas_do_turno(self):
         "@spec:AC-021 as faixas acumuladas no turno sobrevivem a reentrada de Stop"
