@@ -45,7 +45,7 @@ with open(os.path.join(OUT, f"{rotulo}{sufixo}-{ts}.json"), "w", encoding="utf-8
 
 env = {k: v for k, v in os.environ.items() if k.startswith("CLAUDE_")}
 with open(os.path.join(OUT, f"{rotulo}{sufixo}-{ts}.env.json"), "w", encoding="utf-8") as fh:
-    json.dump(env, fh, indent=2, ensure_ascii=False)
+    json.dump(env, fh, indent=2, ensure_ascii=True)
 
 evento = payload.get("hook_event_name", "")
 
@@ -57,7 +57,7 @@ if evento == "PreToolUse" and "PROIBIDO" in json.dumps(payload.get("tool_input",
             "permissionDecision": "deny",
             "permissionDecisionReason": "DENY-PROBE: recurso em uso pela sessao teste-peer. Alternativa: rode 'echo LIBERADO' em vez deste comando.",
         }
-    }, ensure_ascii=False))
+    }, ensure_ascii=True))
     sys.exit(0)
 
 resposta = {"systemMessage": f"SYSMSG-{rotulo}"}
@@ -67,5 +67,5 @@ if evento and rotulo not in SEM_HOOK_OUTPUT:
         "additionalContext": f"ADDCTX-{rotulo}",
     }
 
-print(json.dumps(resposta, ensure_ascii=False))
+print(json.dumps(resposta, ensure_ascii=True))
 sys.exit(0)

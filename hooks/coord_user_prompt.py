@@ -92,6 +92,13 @@ def _registrar_erro_local(exc: BaseException) -> None:
             "event": "error",
             "origem": "coord_user_prompt",
             "hook_event_name": "UserPromptSubmit",
+            # QUEM quebrou. Sem isto, N linhas identicas de erro nao distinguem
+            # "uma sessao quebrada x 40 prompts" de "40 sessoes quebradas" -- e
+            # nesta maquina ha varias sessoes simultaneas, que e o problema que
+            # esta feature inteira existe para tratar. O env serve mesmo quando
+            # o `import ccoord` falhou, que e justamente o cenario coberto aqui;
+            # nao da para usar `hookio.identidade` pelo mesmo motivo.
+            "session_id": os.environ.get("CLAUDE_CODE_SESSION_ID") or None,
             "erro": repr(exc),
         }
         caminho = os.path.join(home, "events.log")

@@ -244,6 +244,30 @@ class TestClaims(unittest.TestCase):
         self.assertIsNone(claims.owner_of("file:turno.txt", esta_vivo=lambda o: True))
         self.assertIsNotNone(claims.owner_of("resource:lease.txt", esta_vivo=lambda o: True))
 
+    def test_events_log_e_append_nunca_trunca(self):
+        "o events.log ACUMULA: trocar O_APPEND por O_TRUNC apagaria o historico inteiro"
+        # A 3a auditoria (17/09) mediu que o mutante `O_APPEND`->`O_TRUNC`
+        # sobrevive a suite INTEIRA. O dano nao e hipotetico: em producao esse
+        # arquivo tem 4,48 MB e e a unica fonte de medicao desta feature --
+        # todas as decisoes de desenho de 17/09 sairam dele. Um truncamento
+        # apaga a evidencia e nao deixa sinal nenhum.
+        dono = _owner("sessao-log", pid=os.getpid())
+        for i in range(3):
+            claims.claim(
+                f"file:acum{i}.txt", dono, 900,
+                {"path": rf"C:\dev\acum{i}.txt", "scope": "turn"},
+                esta_vivo=lambda o: True,
+            )
+
+        eventos = _ler_eventos(self._tmp)
+        adquiridos = [e for e in eventos if e.get("event") == "acquire"]
+        self.assertGreaterEqual(
+            len(adquiridos),
+            3,
+            "o events.log nao acumulou os 3 eventos -- se so o ultimo sobrou, "
+            "a escrita esta truncando em vez de anexar",
+        )
+
     def test_release_turn_do_main_ALCANCA_claim_de_subagente_por_padrao(self):
         "o default agente_exato=False preserva o comportamento do Stop: o main libera o do subagente"
         # Achado ALTA-3 da auditoria (17/09): flipar o default de `False` para

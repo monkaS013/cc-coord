@@ -193,6 +193,36 @@ class TestEncodingDoCliJson(unittest.TestCase):
             os.environ.pop("CCOORD_HOME", None)
         else:
             os.environ["CCOORD_HOME"] = self._antigo
+        # Sem isto cada execucao deixava 3 tempdirs para tras (achado da 3a
+        # auditoria) -- e esta suite roda muitas vezes por sessao.
+        import shutil
+
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_formato_do_json_nao_muda_por_descuido(self):
+        """@spec:AC-012 o `--json` mantem o formato de cada comando (indent), nao so o encoding"""
+        # O helper `_print_json` tem `indent=None` por default, e dois dos cinco
+        # pontos de saida passam `indent=2`. A 3a auditoria mediu que trocar
+        # `indent=2`->`None` (ou o contrario) sobrevive a suite INTEIRA: nada
+        # travava o formato, so o encoding. Quem consome `--json` por linha
+        # quebra em silencio com essa troca.
+        compacto = self._rodar_cli("sweep", "--json")
+        self.assertEqual(compacto.returncode, 0, compacto.stderr[:300])
+        self.assertEqual(
+            len([l for l in compacto.stdout.split(b"\n") if l.strip()]),
+            1,
+            "`sweep --json` tem de sair em UMA linha (indent=None): "
+            f"{compacto.stdout[:120]!r}",
+        )
+
+        indentado = self._rodar_cli("status", "--json")
+        self.assertEqual(indentado.returncode, 0, indentado.stderr[:300])
+        self.assertGreater(
+            len([l for l in indentado.stdout.split(b"\n") if l.strip()]),
+            1,
+            "`status --json` tem de sair INDENTADO (indent=2), como sempre saiu: "
+            f"{indentado.stdout[:120]!r}",
+        )
 
     def test_status_json_sai_em_ascii_puro(self):
         """@spec:AC-012 `status --json` sai em ASCII puro, com acento nos dados"""
