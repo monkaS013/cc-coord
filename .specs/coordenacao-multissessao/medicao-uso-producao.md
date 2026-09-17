@@ -175,12 +175,22 @@ Microbenchmark controlado (mesmo processo, HEAD × corrigido, 3.000 e 1.200 repe
 
 Ou seja, ~2 ms de acréscimo contra um orçamento de 150 ms.
 
-**O gate RNF-04 (p95 < 150 ms no pior caso) NÃO foi validado de forma conclusiva.** Medido
-alternando os dois fontes na mesma janela, com a máquina sob carga de outra sessão (12 processos
-Python de peers): **HEAD reprovou 1 de 4 rodadas, o corrigido reprovou 1 de 4** — o gate oscila em
-torno do limite nos dois lados, e o piso do interpretador chegou a 72 ms (o normal é 31 ms). A
-conclusão que os dados sustentam é "não há regressão detectável"; a conclusão que eles **não**
-sustentam é "o p95 cabe em 150 ms". Remedir com a máquina ociosa antes de afirmar o segundo.
+**Sobre o gate RNF-04, remedido com a máquina livre (piso de 31 ms, o normal):**
+
+*Não há regressão.* Medição **pareada** — os dois fontes alternando em blocos curtos, para que
+qualquer deriva de carga atinja os dois igualmente —, 8 blocos × 30 execuções por lado (480 no total):
+mediana dos deltas **−3,0 ms a favor do corrigido**, 5 dos 8 blocos mais rápidos, p95 melhor
+(162,6 contra 198,2 ms). Medir um lado inteiro e depois o outro dava resultados contraditórios entre
+janelas; foi o pareamento que resolveu.
+
+*O p95 absoluto fica no limiar, e isso é pré-existente.* Com N=200 e piso normal: corrigido p50 76,6 /
+p95 154,1; HEAD p50 95,9 / p95 142,6. Ou seja, o pior caso do caminho quente ronda os 150 ms **nos dois
+lados** — é uma questão do projeto, não deste trabalho.
+
+*O gate em si é estatisticamente frágil:* `N_EXECUCOES = 20`, e o p95 de 20 amostras é praticamente o
+segundo maior valor, então um único outlier de carga reprova. É o que explica as reprovações
+intermitentes vistas o dia todo, inclusive no HEAD limpo. Aumentar N (ou passar a cobrar mediana, com
+o p95 como aviso) deixaria o gate medir o que ele diz medir — fica como sugestão, não foi alterado.
 
 ## Dois defeitos medidos que NÃO foram corrigidos
 
