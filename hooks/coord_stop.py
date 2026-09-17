@@ -106,37 +106,39 @@ def main() -> int:
 
         payload = hookio.ler_payload()
 
-        # T-025/AC-021: fim de turno SEMPRE devolve os claims -- mas de dois
-        # jeitos diferentes, porque "Stop" nao quer dizer a mesma coisa nos
-        # dois casos.
+        # T-025/AC-021: o release acontece no Stop que NAO e reentrada.
         #
-        # O defeito original: o release inteiro ficava sob
-        # `if not stop_hook_active`, e isso produziu 1.140 claims presos em 5
-        # dias (3.934 tomados contra 2.679 liberados, medido em 17/09). Todo
-        # Stop bloqueado por outro hook faz o turno continuar, e nesta maquina
-        # o Stop tem QUATRO hooks de terceiros registrados (verify_gate.py,
-        # delta_gate.py, obsidian_stop.py, hook.mjs) -- tres medidos
-        # bloqueando. Como o ULTIMO Stop de um turno que foi bloqueado alguma
-        # vez tambem chega com `stop_hook_active=True`, o turno inteiro
-        # terminava sem devolver nada.
+        # Historia desta linha, porque ela ja foi escrita errada de dois jeitos
+        # opostos em 17/09 e o registro evita a terceira:
         #
-        # Mas liberar em reentrada tambem estava errado, e a auditoria
-        # adversarial de 17/09 mediu o preco: reentrada NAO e fim de turno, e
-        # apagar ali joga fora as faixas ja acumuladas (T-026) -- a peer que
-        # editasse exatamente onde eu tinha mexido passava a ouvir "sem
-        # sobreposicao". Dai a assimetria abaixo: em reentrada o claim so
-        # passa a expirar rapido (a proxima edicao renova e preserva tudo);
-        # o release de verdade fica no Stop que nao e reentrada.
-        try:
-            dono = hookio.identidade(payload)
-            if payload.get("stop_hook_active"):
-                claims.encurtar_ttl_do_turno(dono, ttl_s=90)
-            else:
-                claims.release(dono, scope="turn")
-        except Exception:
-            pass  # ambos ja sao defensivos; guarda extra, nunca propaga
-
+        # 1. Originalmente o release estava aqui embaixo, junto da limpeza.
+        #    Medi 1.140 claims de turno acumulados em 5 dias e conclui que a
+        #    causa era pular o release em reentrada -- porque o ULTIMO Stop de
+        #    um turno que foi bloqueado alguma vez tambem chega com
+        #    `stop_hook_active=True`.
+        # 2. Passei a liberar SEMPRE. Auditoria mostrou que reentrada nao e fim
+        #    de turno: apagar ali joga fora as faixas acumuladas (T-026).
+        # 3. Troquei por "encurtar o TTL para 90 s em reentrada". Auditoria
+        #    mediu o preco disso no `events.log` real: o intervalo entre duas
+        #    edicoes do mesmo recurso tem MEDIANA de 79,4 s e passa de 90 s em
+        #    48,2% dos casos (n=1.981). Ou seja, em quase metade das vezes o
+        #    claim expirava no meio do turno -- perdia as faixas do mesmo jeito
+        #    E, pior, liberava o recurso para uma peer com o dono VIVO
+        #    trabalhando. Trocar exclusao por limpeza e o negocio errado.
+        #
+        # O que estava errado era a PREMISSA de 1: claim de turno vazado nao
+        # bloqueia ninguem. Passados os 900 s de TTL ele fica inerte --
+        # `coord_session_start.py` pula expirado ao montar o mapa e `policy` so
+        # consulta dono vivo e nao expirado. O dano real era acumulo de arquivo
+        # em disco, e quem resolve isso e o `claims.sweep()` do SessionStart
+        # (AC-022), sem tocar em exclusao. Entao aqui volta a regra simples:
+        # reentrada nao mexe em claim nenhum.
         if not payload.get("stop_hook_active"):
+            try:
+                dono = hookio.identidade(payload)
+                claims.release(dono, scope="turn")
+            except Exception:
+                pass  # release() ja e defensivo; guarda extra, nunca propaga
             # Limpeza de manutencao (nao e liberacao de recurso): so uma vez
             # por turno basta, e nada fica preso se ela esperar.
             try:

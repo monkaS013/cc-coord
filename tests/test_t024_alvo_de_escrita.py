@@ -211,6 +211,26 @@ class TestAlvoEntreAspasComEspaco(unittest.TestCase):
             any("arquivo.txt" in a for a in alvos), f"o alvo sumiu com aspa sem par: {alvos!r}"
         )
 
+    def test_apostrofo_no_meio_do_nome_nao_abre_citacao(self):
+        "@spec:AC-020 apóstrofo dentro do nome (`Bob's`) não engole o alvo seguinte"
+        # Achado da 3ª auditoria: com número PAR de apóstrofos o pareamento
+        # errado juntava dois caminhos num token só e o resultado era ZERO
+        # recurso — enquanto o `.split()` antigo achava os dois. A proteção de
+        # aspa-sem-par não cobria, porque o número era par. 136 arquivos desta
+        # máquina têm apóstrofo no caminho.
+        alvos = _arquivos(r"tee C:\dev\Bob's\a.log C:\dev\Ana's\b.log")
+        self.assertEqual(len(alvos), 2, f"apóstrofo do nome engoliu alvo: {alvos!r}")
+        self.assertTrue(all("'" in a for a in alvos), alvos)
+
+        alvos = _arquivos("sed -i 's/a/b/' C:/dev/Claude's/n1.md C:/dev/Bob's/n2.md")
+        self.assertEqual(len(alvos), 2, f"perdeu alvo: {alvos!r}")
+
+    def test_citacao_no_inicio_do_token_continua_valendo(self):
+        "@spec:AC-020 aspa no início do token ainda delimita (não-vacuidade)"
+        alvos = _arquivos("sed -i 's/a/b/' \"C:/Users/V/Area de Trabalho/n.md\"")
+        self.assertEqual(len(alvos), 1, f"esperava 1, veio {alvos!r}")
+        self.assertTrue(alvos[0].endswith(os.path.join("Area de Trabalho", "n.md")), alvos[0])
+
     def test_tee_com_caminho_entre_aspas(self):
         "@spec:AC-020 `tee` com caminho com espaco tambem vem inteiro"
         alvos = _arquivos('echo x | tee "C:/Oscar Alho/Daily/2026-09-17 (copia).md"')

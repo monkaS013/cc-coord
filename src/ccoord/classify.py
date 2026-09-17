@@ -873,6 +873,16 @@ def _tokens_respeitando_aspas(texto: str) -> list:
          virar um token gigante e o alvo real desaparecer. Nesse caso
          DEGRADAMOS para `split()`, que era o comportamento anterior -- pior
          para caminho com espaco, mas nunca pior do que o que ja havia.
+
+      3. aspa so ABRE citacao no INICIO de um token. Sem isto, apostrofo no
+         MEIO de um nome proprio parcava com o do nome seguinte e engolia os
+         dois alvos: `tee C:\\dev\\Bob's\\a.log C:\\dev\\Ana's\\b.log` devolvia
+         ZERO recurso, enquanto o `.split()` antigo achava os dois (medido pela
+         auditoria de 17/09; 136 arquivos desta maquina tem apostrofo no
+         caminho, como `NF's Megacomm x Belenus\\34773.pdf`). A protecao 2 nao
+         cobria: com numero PAR de apostrofos a degradacao nunca disparava.
+         Esta e a regra do shell de verdade -- `it's` no meio de uma palavra
+         nao inicia citacao.
     """
     texto = texto.strip()
     tokens: list = []
@@ -893,7 +903,9 @@ def _tokens_respeitando_aspas(texto: str) -> list:
                 aspa = ""
             else:
                 atual.append(ch)
-        elif ch in "\"'":
+        elif ch in "\"'" and not atual:
+            # `not atual` = estamos no INICIO de um token (protecao 3 acima).
+            # Aspa no meio de uma palavra e caractere literal do nome.
             aspa = ch
         elif ch.isspace():
             if atual:

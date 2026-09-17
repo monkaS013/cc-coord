@@ -134,6 +134,36 @@ Outros seis: regressão do tokenizador com aspa escapada e aspa sem par (casos q
 acertava), `tee`/`cp` sem o tokenizador novo, `claims.overlapping()` e `ccoord status/who` lendo só
 `range` (dois oráculos para a mesma pergunta), e `ranges` malformado derrubando a decisão em silêncio.
 
+## A auditoria sobre o conserto (terceira rodada) — dois defeitos no que eu tinha corrigido
+
+O gate de delta cobrou verificação do conserto dos achados anteriores, e estava certo: **os consertos
+tinham dois defeitos**, um deles pior que o problema original.
+
+**O encurtamento de TTL trocava exclusão por limpeza.** A hipótese era "reentrada encurta para 90 s, e
+a próxima edição renova preservando tudo" — e ela só vale se a próxima edição chegar dentro dos 90 s.
+Medido no `events.log` real (n=1.981 intervalos entre `acquire` do mesmo recurso e sessão): **mediana
+de 79,4 s, e 48,2% acima de 90 s**. Em quase metade dos casos o claim expirava no meio do turno:
+perdia as faixas do mesmo jeito **e liberava o recurso para uma peer com o dono vivo trabalhando**.
+
+O erro não estava no conserto, estava na premissa que originou a correção: **claim de turno vazado não
+bloqueia ninguém.** Passado o TTL ele é inerte — `coord_session_start.py:98` pula expirado ao montar o
+mapa e a política só consulta dono vivo e não expirado (verifiquei no código em vez de assumir). O
+dano real dos 1.140 claims era acúmulo de arquivo em disco, e quem resolve isso é o `claims.sweep()`
+do `SessionStart`, sem tocar em exclusão. A regra voltou a ser a simples — reentrada não mexe em claim
+nenhum — e a função foi removida para não ficar arma carregada. Detalhe irônico: a aritmética dela
+estava correta (36 casos, zero alongamento, idempotente); o defeito era a decisão de usá-la.
+
+**E o apóstrofo de nome próprio cegava o alvo.** A proteção de aspa sem par só cobria número ímpar;
+com número par, o tokenizador pareava `Bob's` com `Ana's` e engolia os dois caminhos num token só —
+zero recurso onde o `.split()` antigo achava dois, violando o invariante escrito no próprio docstring
+("nunca pior do que o que já havia"). 136 arquivos desta máquina têm apóstrofo no caminho. Corrigido
+com a regra do shell de verdade: aspa só abre citação no início de um token.
+
+**Nota de método que se repetiu:** `tools/avaliar_filtro.py` chama `_alvo_de_escrita_plausivel`
+direto, então mede o *filtro*, não o *pipeline* — não teria como reprovar um defeito de tokenização.
+É o mesmo erro de grão que reprovou o `events.log` como controle negativo, agora dentro da ferramenta
+que nasceu justamente para consertar aquele erro.
+
 ## Custo no caminho quente — o que foi e o que não foi provado
 
 Microbenchmark controlado (mesmo processo, HEAD × corrigido, 3.000 e 1.200 repetições):
