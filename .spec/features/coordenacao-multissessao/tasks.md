@@ -174,11 +174,12 @@
 - Arquivos: hooks/coord_user_prompt.py, src/ccoord/install.py, tests/test_t032_inicio_de_turno.py, tests/test_install.py
 - Notas: depende de T-030 (ASM-007) e T-031. Faz UMA coisa, e so quando a origem e o composer do usuario (AC-027): `claims.release(identidade(payload), "turn", agente_exato=True)`, exit 0, stdout VAZIO. Stdout vazio nao e estetica: o binario monta `additionalContext` SOZINHO a partir de qualquer stdout nao vazio com exit 0, so neste evento e no `UserPromptExpansion` -- um `print()` de depuracao esquecido vira token gasto em TODA mensagem do usuario. E exit 2 BLOQUEIA o prompt ("Prompt blocked: the UserPromptSubmit hooks did not run over the submitted text"). Nada de `additionalContext` -- o hook nao tem o que dizer e gastaria token do usuario a cada prompt. Dono indeterminavel (`session_id` vazio) NAO libera nada: dono vazio casa com claim de dono vazio de qualquer sessao (ASM-009). Entra em `HOOKS_SPECS` com matcher vazio; `install.py` tem verificacao por sha256 e contagem de entrypoints -- os dois sobem de 8 para 9 e `test_install.py` precisa acompanhar.
 
-## T-033 - Gate de custo e instalacao [pendente]
+## T-033 - Gate de custo e instalacao [concluida]
 
 - Refs: AC-024
 - Arquivos: tools/bench_hooks.py, .specs/coordenacao-multissessao/medicao-perf.md
 - Notas: o hook novo roda no caminho do PROMPT, nao no caminho quente de ferramenta, mas o gate segue p95 < 150 ms. Atencao ao gate de perf existente: `tests/test_perf.py` usa `N_EXECUCOES=20`, e p95 de 20 amostras e quase o segundo maior valor -- um outlier reprova (reprovacoes intermitentes medidas o dia todo em 17/09, inclusive no HEAD limpo). Instalacao e FRONTEIRA DE APROVACAO (Q-008): escreve no `settings.json` global e afeta todas as sessoes abertas -- exige OK do Vinicius, `ListAgents` e `SendMessage` as peers antes.
+- INSTALADO em 17/09 16:09 com OK explicito do Vinicius, depois de `--dry-run` e de avisar as peers vivas (`home`, `home-smooth-micali`; a `home-piped-liskov` ja havia encerrado). **Verificado em quatro pontos, nao pela linha de log:** (1) `settings.json` lista `coord_user_prompt.py` no `UserPromptSubmit`, AO LADO do `context_alert.py` de terceiro, que continua la -- 24 hooks no total, 15 de terceiros intactos; (2) sha256 dos **9 de 9** entrypoints instalados batem com o repo; (3) backup datado criado (`settings.json.bak-20260917-160928`); (4) o hook **instalado** (nao o do repo) rodado com `CCOORD_HOME` de teste: exit 0, stdout VAZIO, e o claim de turno foi de presente para ausente. Nota: o conserto da T-035 ja estava no ar antes desta instalacao, porque os hooks importam de `CCOORD_SRC`, que aponta para o repo.
 
 ## T-034 - Provar no uso real, nao so no teste [pendente]
 

@@ -1,6 +1,15 @@
 # Como retomar a feature cc-coord
 
-> **Atualização 17/09/2026, noite — pendência 1 IMPLEMENTADA e verificada; falta só INSTALAR.**
+> **Atualização 17/09/2026, 16h09 — pendência 1 INSTALADA e em produção.** São **9 hooks** agora.
+> Verificado: `settings.json` com o hook novo ao lado do `context_alert.py` de terceiro (24 hooks, 15
+> de terceiros intactos), sha256 de 9/9 entrypoints batendo, backup `settings.json.bak-20260917-160928`,
+> e o hook instalado exercitado (exit 0, stdout vazio, claim liberado).
+> **Única ponta aberta: T-034** — a prova em uso REAL. Repetir `mede_fronteira_turno` sobre uma janela
+> nova: a fração de ciclos que atravessam ≥1 prompt tem de cair de 20,1% para ~0 **e** as disputas de
+> "mesmo turno" (40 em 5 dias, que são a feature funcionando) não podem virar 0 — se virarem, o release
+> está comendo turno vivo. Os dois lados, senão a medida não vale.
+>
+> **Atualização anterior (17/09, noite) — pendência 1 implementada e verificada, antes de instalar.**
 > 348 testes verdes, `onp-spec verify` 27/27 com prova PASS, `audit --ci` limpo. T-030 a T-032, T-035
 > e T-036 concluídas. **O que falta é a T-033: a instalação, que escreve no `settings.json` global e
 > afeta todas as sessões abertas — fronteira de aprovação, igual à T-012.** O hook novo
