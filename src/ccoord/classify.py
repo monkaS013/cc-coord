@@ -704,6 +704,82 @@ def _segmentos_bash(command: str) -> list:
     return [s for s in re.split(r"&&|\|\||[;|]", command) if s.strip()]
 
 
+# ---------------------------------------------------------------------------
+# Sanidade do alvo (T-024, AC-019). Medido no uso real: 925 de 6.737 ids
+# (13,7%) nao eram caminho -- eram pedaco do proprio comando. Oito chegaram a
+# `os.open` e voltaram `[Errno 22] Invalid argument`; dois geraram disputa de
+# claim contra recurso inexistente. Ruido que ensina a ignorar o aviso e como
+# um gate morre.
+#
+# O filtro roda ANTES de virar recurso e so olha o TEXTO do alvo (nao toca o
+# disco - o caminho quente do RNF-04 nao paga I/O por isto). Cada regra tem
+# teste proprio e, junto, um controle negativo com caminhos legitimos: um
+# filtro que rejeita demais troca ruido por CEGUEIRA, defeito pior do que o
+# que ele conserta.
+# ---------------------------------------------------------------------------
+
+# CADA regra abaixo foi medida contra DOIS corpora antes de entrar (17/09):
+#   - 736 alvos que o classificador ja produziu e que NAO existem em disco
+#     (fragmentos reais, colhidos do events.log de producao);
+#   - 129.562 arquivos que EXISTEM nesta maquina (vault, dev, .claude,
+#     OneDrive) -- o lado que nao pode ser cegado.
+# Resultado do conjunto: pega 309/736 fragmentos e cega 0 de 129.562 reais.
+#
+# A PRIMEIRA versao desta funcao foi reprovada por auditoria adversarial
+# exatamente aqui: ela tinha regras "espertas" (parentese + `;,=`, chamada
+# `\w(`, teto de 260 chars) que pareciam certas e cegavam 5,15% dos arquivos
+# reais -- inclusive o vault inteiro, que nomeia nota como
+# `Plano - portfolio GitHub (plano completo, 2026-08-25).md`. Medidas:
+#   parentese+[;,=]  53 fragmentos, 340 arquivos reais cegados
+#   chamada `\w(`    68 fragmentos, 622 arquivos reais cegados
+#   len > 260         0 fragmentos, 7.278 arquivos reais cegados
+# Trocar ruido por cegueira e o defeito PIOR -- por isso as tres sairam.
+# Regra para mexer aqui: rode tools/avaliar_filtro.py e nao aceite nenhuma
+# regra que cegue arquivo real. Intuicao sobre "cara de codigo" nao passa.
+_PROIBIDOS_WIN = set('<>"|?*')
+_SEPARADOR_PATH = re.compile(r"[\\/]+")
+# `$VAR`, `${VAR}`, `%VAR%` ocupando um SEGMENTO INTEIRO do caminho: variavel
+# que o shell expandiria e o classificador nao. Casar em qualquer posicao (e
+# nao no segmento inteiro) cegaria `SG$A Rateio_Chile.xlsx` e `~$planilha.xlsx`
+# -- nomes reais de planilha nesta maquina. Medido: 491 ocorrencias no log de
+# producao (`$WORK`, `$SP`, `$COPY`, `$SCRATCH`), 0 arquivos reais cegados.
+_SEGMENTO_VARIAVEL = re.compile(r"\$\{?[A-Za-z_]\w*\}?|%[A-Za-z_]\w*%")
+# Rede final contra bloco de codigo inteiro capturado como alvo. Alto de
+# proposito: o limite de MAX_PATH (260) nao pegava UM fragmento sequer e
+# cegava 7.278 arquivos reais (caminhos longos de `.claude` e do OneDrive).
+_MAX_ALVO = 1024
+_DESCARTAVEIS_SUFIXO = ("/dev/null", "/dev/stdout", "/dev/stderr")
+_DESCARTAVEIS_NOME = ("nul", "con", "prn")
+
+
+def _alvo_de_escrita_plausivel(alvo: str) -> bool:
+    """O alvo pode ser um caminho de arquivo neste SO? (T-024, AC-019)"""
+    alvo = alvo.strip()
+    if not alvo or len(alvo) > _MAX_ALVO:
+        return False
+    # Proibidos pelo SO: nenhum arquivo do Windows pode ter estes caracteres,
+    # entao rejeitar aqui nao cega nada por construcao.
+    if any(ch in _PROIBIDOS_WIN or ord(ch) < 32 for ch in alvo):
+        return False
+    # `:` fora da posicao de letra de unidade (`C:`) e caminho invalido ou ADS
+    # do NTFS -- em nenhum dos dois casos e o arquivo que o comando toca.
+    sem_drive = alvo[2:] if len(alvo) > 1 and alvo[1] == ":" else alvo
+    if ":" in sem_drive:
+        return False
+    if any(_SEGMENTO_VARIAVEL.fullmatch(s) for s in _SEPARADOR_PATH.split(alvo)):
+        return False
+    # Fim em pontuacao de codigo. `)` fica de FORA: `Backup (1)` e
+    # `relatorio (copia)` sao nomes reais (5 arquivos reais terminam em `)`
+    # nesta maquina, todos `css(1)` de pagina salva).
+    if alvo.endswith((";", ",", "'")):
+        return False
+    # `/dev/null)`, `> nul;` -- descartavel com sujeira colada.
+    limpo = alvo.rstrip(")};,.'\"").lower().replace("\\", "/")
+    if limpo.endswith(_DESCARTAVEIS_SUFIXO) or limpo.rsplit("/", 1)[-1] in _DESCARTAVEIS_NOME:
+        return False
+    return True
+
+
 def _recurso_escrita(alvo: str, cwd):
     """Recurso de escrita de arquivo, ou None quando nao da para saber ONDE.
 
@@ -713,6 +789,8 @@ def _recurso_escrita(alvo: str, cwd):
     que o ensaio de 12/09 mediu. Caminho absoluto nao depende do cwd e segue
     valendo, para o cwd desconhecido nao cegar o gate inteiro.
     """
+    if not _alvo_de_escrita_plausivel(alvo):
+        return None  # T-024/AC-019: fragmento de comando nao vira claim
     if cwd is None:
         if not _e_absoluto(alvo):
             return None
@@ -771,6 +849,66 @@ _SED_INPLACE = re.compile(r"(?:^|\s)-i\S*|--in-place\b", re.IGNORECASE)
 _TOKEN_FINAL = re.compile(r"(\"[^\"]*\"|'[^']*'|\S+)\s*$")
 
 
+def _tokens_respeitando_aspas(texto: str) -> list:
+    """`split()` que nao quebra dentro de aspas (T-024, AC-020).
+
+    `seg.split()` cru transformava
+    `sed -i 's/a/b/' "C:/.../Area de Trabalho/nota.md"` em tres alvos
+    (`...\\Area`, `de`, `Trabalho\\nota.md`) e nenhum do arquivo real -- gate
+    CEGO, nao ruidoso, em toda caminho com espaco (que aqui e a regra:
+    "Area de Trabalho", "Program Files", "OneDrive - HDT ENERGY").
+
+    Escrito a mao em vez de `shlex`: com `posix=True` ele come as contrabarras
+    de caminho do Windows; com `posix=False` ele devolve as aspas coladas no
+    token e engasga com aspa sem par.
+
+    Duas protecoes que a auditoria adversarial de 17/09 exigiu, porque sem
+    elas o tokenizador PERDIA alvo que o `split()` cru acertava:
+
+      1. `\\"` dentro de aspas duplas e escape, nao fechamento --
+         `sed -i "s/\\"/X/g" a.md b.md` fechava a aspa cedo e engolia os dois
+         arquivos num token so. So a contrabarra seguida da MESMA aspa que
+         abriu conta como escape; `C:\\Users\\x` nao e afetado.
+      2. aspa sem par (`sed -i "s/a/b/ arquivo.txt`) faz o resto do comando
+         virar um token gigante e o alvo real desaparecer. Nesse caso
+         DEGRADAMOS para `split()`, que era o comportamento anterior -- pior
+         para caminho com espaco, mas nunca pior do que o que ja havia.
+    """
+    texto = texto.strip()
+    tokens: list = []
+    atual: list = []
+    aspa = ""
+    i = 0
+    n = len(texto)
+    while i < n:
+        ch = texto[i]
+        if aspa:
+            # `\` so escapa quando vem colado na aspa que abriu; em qualquer
+            # outro caso e separador de caminho do Windows e fica literal.
+            if ch == "\\" and i + 1 < n and texto[i + 1] == aspa:
+                atual.append(aspa)
+                i += 2
+                continue
+            if ch == aspa:
+                aspa = ""
+            else:
+                atual.append(ch)
+        elif ch in "\"'":
+            aspa = ch
+        elif ch.isspace():
+            if atual:
+                tokens.append("".join(atual))
+                atual = []
+        else:
+            atual.append(ch)
+        i += 1
+    if aspa:
+        return texto.split()  # aspa sem par: degrada para o comportamento antigo
+    if atual:
+        tokens.append("".join(atual))
+    return tokens
+
+
 def _alvos_sed(seg: str) -> list:
     """Arquivos que um `sed -i` edita: todo token depois da expressao.
 
@@ -778,7 +916,7 @@ def _alvos_sed(seg: str) -> list:
     propria expressao (`s/a/b/`, `1d`, `/x/d`). O que sobra sao caminhos --
     e sao TODOS alvos: `sed -i 's/a/b/' f1 f2 f3` edita os tres.
     """
-    tokens = seg.strip().split()
+    tokens = _tokens_respeitando_aspas(seg)
     alvos = []
     pular = False
     viu_expressao = False
@@ -818,7 +956,11 @@ def _detectar_sed_inplace(command: str, cwd: str) -> list:
 
 
 _PS_WRITE_CMDLET = re.compile(r"\b(set-content|add-content|out-file)\b", re.IGNORECASE)
-_PS_PATH_FLAG = re.compile(r"-(?:path|filepath)\s+\"?([^\"\s]+)\"?", re.IGNORECASE)
+# Aspas primeiro: `-Path "C:/OneDrive - HDT ENERGY/x.txt"` so vem inteiro se a
+# alternativa com aspas casar antes da sem aspas (T-024, AC-020).
+_PS_PATH_FLAG = re.compile(
+    r"-(?:path|filepath)\s+(?:\"([^\"]+)\"|'([^']+)'|([^\"'\s]+))", re.IGNORECASE
+)
 _PS_POSICIONAL = re.compile(r"^\s*(?:-\S+(?:\s+\S+)?\s+)*(\"[^\"]*\"|'[^']*'|[^\s\"'-][^\s]*)")
 
 
@@ -831,7 +973,8 @@ def _detectar_escrita_powershell(command: str, cwd: str) -> list:
         resto = seg[m.end():]
         pm = _PS_PATH_FLAG.search(resto)
         if pm:
-            alvo = pm.group(1)
+            # tres grupos alternativos: "aspas duplas", 'simples', sem aspas
+            alvo = pm.group(1) or pm.group(2) or pm.group(3)
         else:
             tm = _PS_POSICIONAL.match(resto)
             alvo = tm.group(1) if tm else None
@@ -855,7 +998,10 @@ _TEE_TRIGGER = re.compile(r"\btee\b((?:\s+-\w+)*(?:\s+[^|;&<>]+)?)", re.IGNORECA
 def _detectar_tee(command: str, cwd: str) -> list:
     resources = []
     for m in _TEE_TRIGGER.finditer(command):
-        for tok in (m.group(1) or "").split():
+        # T-024/AC-020: mesmo tokenizador do `sed` -- com `.split()` cru,
+        # `tee "C:/Oscar Alho/Daily/2026-09-17 (copia).md"` virava quatro
+        # alvos quebrados e nenhum do arquivo real (achado da auditoria).
+        for tok in _tokens_respeitando_aspas(m.group(1) or ""):
             if tok.startswith("-"):
                 continue
             alvo_path = tok.strip("\"'")
@@ -889,7 +1035,11 @@ def _detectar_copia_move(command: str, cwd: str) -> list:
         m = _COPIA_TRIGGER.search(seg)
         if not m:
             continue
-        tokens = seg[m.end():].split()
+        # T-024/AC-020: tokenizador que respeita aspas, senao
+        # `cp origem.md "C:/Oscar Alho/Daily/2026-09-17.md"` toma como destino
+        # o ULTIMO pedaco depois do espaco, e o claim sai no arquivo errado --
+        # pior que nao avisar, porque avisa sobre outro arquivo.
+        tokens = _tokens_respeitando_aspas(seg[m.end():])
         caminhos = []
         pular = False
         for tok in tokens:

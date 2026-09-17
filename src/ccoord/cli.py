@@ -288,6 +288,16 @@ def _fmt_range(faixa) -> str:
     return f"{faixa[0]}-{faixa[1]}"
 
 
+def _fmt_ranges(claim) -> str:
+    """Todas as faixas do turno (T-026). Ler so `claim.range` mostraria a
+    ultima edicao como se fosse a unica -- o `status`/`who` passaria a
+    discordar do aviso que a peer recebe, que olha o conjunto."""
+    faixas = list(getattr(claim, "ranges", None) or [])
+    if not faixas:
+        return _fmt_range(getattr(claim, "range", None))
+    return ", ".join(f"{a}-{b}" for a, b in faixas)
+
+
 def _print_table(headers: list[str], rows: list[list[str]]) -> None:
     larguras = [len(h) for h in headers]
     for row in rows:
@@ -412,7 +422,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         linhas = [
             [
                 c.path,
-                _fmt_range(c.range),
+                _fmt_ranges(c),
                 c.owner.name or c.owner.session_id,
                 _humanize_age(c.acquired_at, agora_ms),
                 c.purpose or "(sem descrição)",
@@ -457,7 +467,7 @@ def cmd_who(args: argparse.Namespace) -> int:
     for c in achados:
         dono = c.owner.name or c.owner.session_id
         print(
-            f"{c.path} [{_fmt_range(c.range)}] — dono: {dono} "
+            f"{c.path} [{_fmt_ranges(c)}] — dono: {dono} "
             f"(ocupado {_humanize_age(c.acquired_at, agora_ms)}) — "
             f"{c.purpose or '(sem descrição)'}"
         )

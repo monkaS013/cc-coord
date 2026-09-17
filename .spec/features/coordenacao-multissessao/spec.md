@@ -144,6 +144,47 @@ derrube um turno, para que a coordenação não custe mais do que a colisão que
 - **Quando** esta sessão vai executar a próxima ação
 - **Então** o aviso aparece para o modelo naquele momento, com o arquivo e o horário da alteração
 
+### US-005 — O que 5 dias de uso real mostraram (17/09)
+
+Como dono da máquina, quero que o registro de recursos descreva a realidade: claim sobre arquivo que
+existe, liberado quando o turno acaba, e com a faixa onde o dono está agora.
+
+#### AC-019 — Fragmento de comando não vira claim
+
+- **Dado** um comando cujo alvo de escrita é variável não expandida (`$STATE_FILE`, `%TEMP%`), pedaço de código (`).write(...)`, `, html)`) ou tem caractere que o Windows proíbe em nome de arquivo
+- **Quando** o classificador processa o comando
+- **Então** nenhum recurso de arquivo é criado para esse alvo
+- **E** caminho legítimo com espaço, acento, parênteses, nome curto 8.3 ou UNC continua virando claim
+
+#### AC-020 — Caminho entre aspas com espaço vira um claim, o do arquivo real
+
+- **Dado** um comando de escrita (`sed -i`, `Set-Content -Path`) cujo alvo está entre aspas e contém espaço
+- **Quando** o classificador extrai os alvos
+- **Então** sai um único recurso, com o caminho inteiro
+- **E** um comando com vários arquivos continua gerando um recurso por arquivo
+
+#### AC-021 — Reentrada de Stop também libera os claims do turno
+
+- **Dado** claims de escopo `turn` desta sessão e um `Stop` com `stop_hook_active` verdadeiro (outro hook de Stop bloqueou e o turno continuou)
+- **Quando** o hook de fim de turno roda
+- **Então** os claims de turno desta sessão são liberados do mesmo jeito, e a saída continua silenciosa
+- **E** claims de outra sessão não são tocados
+
+#### AC-022 — Claim órfão não espera o TTL de ninguém
+
+- **Dado** um claim em disco de sessão morta ou já expirado
+- **Quando** uma sessão nova começa
+- **Então** esse claim é removido antes de o mapa de peers ser montado
+- **E** claim de sessão viva dentro do TTL continua intacto
+
+#### AC-023 — A faixa do claim acompanha o turno inteiro
+
+- **Dado** que o dono já reivindicou um arquivo nas linhas 10-12 e agora edita as linhas 80-84
+- **Quando** o claim é renovado
+- **Então** o claim em disco passa a listar as duas faixas, e a mais recente vira a principal
+- **E** a peer que edita a linha 82 recebe aviso de sobreposição, enquanto quem edita a linha 500 recebe só ciência
+- **E** claim sem faixa (`Write`, arquivo inteiro) continua colidindo com qualquer edição
+
 ## Fora de escopo
 
 - Resolver o merge de trabalho concorrente: a feature evita a colisão, integrar continua sendo decisão do Vinicius.

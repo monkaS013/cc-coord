@@ -186,10 +186,37 @@ def _ranges_overlap(a, b) -> bool:
     return a[0] <= b[1] and b[0] <= a[1]
 
 
+def _faixas_do_dono(owner) -> list:
+    """Faixas que o dono tocou no turno (T-026/AC-023).
+
+    Lista vazia = arquivo inteiro. `getattr` com default para claim lido de
+    disco no formato anterior a T-026, que nao tem o campo.
+    """
+    faixas = list(getattr(owner, "ranges", None) or [])
+    if not faixas and getattr(owner, "range", None):
+        faixas = [owner.range]
+    return faixas
+
+
+def _sobrepoe_alguma(lines, faixas: list) -> bool:
+    """`lines` colide com alguma faixa do dono? Lista vazia = arquivo inteiro."""
+    if not faixas:
+        return True  # dono do arquivo inteiro colide com tudo
+    return any(_ranges_overlap(lines, f) for f in faixas)
+
+
 def _fmt_faixa(faixa) -> str:
     if faixa is None:
         return "o arquivo inteiro"
     return f"as linhas {faixa[0]}-{faixa[1]}"
+
+
+def _fmt_faixas(faixas: list) -> str:
+    if not faixas:
+        return "o arquivo inteiro"
+    if len(faixas) == 1:
+        return _fmt_faixa(faixas[0])
+    return "as linhas " + ", ".join(f"{a}-{b}" for a, b in faixas)
 
 
 def _claim_de_peer_viva(owner: Optional[Claim], me: Optional[Session], peers: list) -> bool:
@@ -485,7 +512,11 @@ def _decidir_arquivo(resource: Resource, owner: Optional[Claim], me: Optional[Se
         return _allow(resource, None)
 
     dono = _dono_nome(owner)
-    faixa_txt = _fmt_faixa(owner.range)
+    # T-026/AC-023: o texto e a decisao usam TODAS as faixas do turno do dono,
+    # nao so a ultima. Antes, `owner.range` congelava na primeira edicao e a
+    # peer que mexia onde o dono estava AGORA ouvia "sem sobreposicao".
+    faixas = _faixas_do_dono(owner)
+    faixa_txt = _fmt_faixas(faixas)
 
     if resource.action == "write":
         razao = (
@@ -498,7 +529,7 @@ def _decidir_arquivo(resource: Resource, owner: Optional[Claim], me: Optional[Se
         return Decision("warn", _trunca_razao(razao), "forte", resource.id, dono)
 
     # Edit
-    sobrepoe = _ranges_overlap(resource.lines, owner.range)
+    sobrepoe = _sobrepoe_alguma(resource.lines, faixas)
     if sobrepoe:
         # Texto no PASSADO de proposito: o `additionalContext` de um PreToolUse
         # que nao bloqueia chega ao modelo JUNTO com o resultado da ferramenta,
