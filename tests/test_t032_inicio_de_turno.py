@@ -314,14 +314,34 @@ class TestAchadosDaAuditoria(_Base):
     def test_nao_vacuidade_agent_id_real_continua_poupando_subagente(self):
         """@spec:AC-025 controle: `agent_id` de verdade continua sendo respeitado"""
         # Contraprova da normalizacao acima: ela nao pode ter transformado
-        # "agente de verdade" em "sem agente", senao o A3 viraria o defeito que
-        # o AC-025 existe para impedir.
-        _claim("file:do-subagente.md", _owner(agent_id="agente-7"))
+        # "agente de verdade" em "sem agente".
+        #
+        # Este par de assercoes foi REESCRITO depois que a 3a auditoria (17/09)
+        # mediu que a versao anterior tinha poder discriminante ZERO: com o
+        # mutante `agent_id = None` sempre (que colapsa TODO agente), o teste
+        # continuava verde -- o `agente_exato` salvava a assercao pelo motivo
+        # errado, porque dono e pedinte viravam ambos None e o claim era
+        # removido... nao, era preservado, e a assercao passava sem provar
+        # nada sobre a identidade. Agora o teste exerce as DUAS direcoes na
+        # mesma execucao, e e a segunda que mata o mutante: se o agent_id
+        # colapsar, o claim do proprio agente deixa de ser reconhecido como
+        # dele e sobrevive quando deveria sair.
+        _claim("file:do-agente-7.md", _owner(agent_id="agente-7"))
+        _claim("file:do-agente-9.md", _owner(agent_id="agente-9"))
+
         proc = self.rodar(self.payload(agent_id="agente-9"))
         self.assertEqual(proc.returncode, 0, proc.stderr[:400])
+
         self.assertTrue(
-            _existe("file:do-subagente.md"),
-            "a normalizacao de agent_id colapsou agentes distintos",
+            _existe("file:do-agente-7.md"),
+            "a normalizacao de agent_id colapsou agentes distintos: o claim de "
+            "OUTRO subagente foi liberado",
+        )
+        self.assertFalse(
+            _existe("file:do-agente-9.md"),
+            "o claim do PROPRIO agente que enviou o prompt sobreviveu -- sinal "
+            "de que o agent_id nao esta chegando na identidade (colapsado para "
+            "None, ou perdido no caminho)",
         )
 
     def test_falha_de_import_deixa_rastro_no_events_log(self):
@@ -336,6 +356,7 @@ class TestAchadosDaAuditoria(_Base):
         env["CCOORD_HOME"] = self.home
         env["CCOORD_SESSIONS_DIR"] = self.sessions
         env["CCOORD_SRC"] = os.path.join(self.tmp, "nao-existe")
+        env["CLAUDE_CODE_SESSION_ID"] = "sessao-que-quebrou"
         # Sem o fallback relativo ao proprio arquivo, o hook copiado acharia o
         # `src/` do repo; copio o hook para fora da arvore para que o unico
         # caminho de import seja o CCOORD_SRC quebrado.
@@ -368,6 +389,15 @@ class TestAchadosDaAuditoria(_Base):
             f"nenhuma linha de erro deste hook no events.log: {linhas!r}",
         )
         self.assertEqual(erros[-1].get("event"), "error")
+        # QUEM quebrou: sem o `session_id`, N linhas identicas nao distinguem
+        # "uma sessao quebrada x 40 prompts" de "40 sessoes quebradas" -- e esta
+        # maquina roda varias sessoes ao mesmo tempo, que e o problema inteiro
+        # desta feature. Achado da 3a auditoria (17/09).
+        self.assertEqual(
+            erros[-1].get("session_id"),
+            "sessao-que-quebrou",
+            "a linha de erro nao diz QUAL sessao quebrou",
+        )
 
     def _src_falso_que_levanta(self) -> str:
         """Monta um pacote `ccoord` falso cujo `release` LEVANTA.
