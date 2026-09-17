@@ -89,7 +89,18 @@ if str(SRC) not in sys.path:
 
 from ccoord import claims, classify, sessions  # noqa: E402
 
-N_EXECUCOES = 20
+# N=20 era estatisticamente frágil: com 20 amostras o p95 cai no 19º valor
+# ordenado, ou seja, praticamente o SEGUNDO MAIOR -- um único outlier de carga
+# reprova o gate. Foi o que explicou as reprovações intermitentes do dia 17/09,
+# inclusive no HEAD limpo e inclusive com o código medido MAIS RÁPIDO que o
+# HEAD numa medição pareada (480 execuções, mediana dos deltas -3,0 ms).
+# Com N=60 o p95 é o 57º de 60: continua sensível a regressão real, mas deixa
+# de ser decidido por uma única amostra ruim.
+#
+# O LIMITE NÃO SE AFROUXA -- 150 ms é requisito do Vinicius (RNF-04); se não
+# couber, a decisão é dele, não minha. O que mudou aqui é a PRECISÃO da
+# estimativa, não o critério.
+N_EXECUCOES = 60
 LIMITE_P95_MS = 150.0
 
 
