@@ -59,6 +59,7 @@ TODOS_OS_HOOKS = [
     "coord_pre_bash.py",
     "coord_post_batch.py",
     "coord_file_changed.py",
+    "coord_user_prompt.py",
     "coord_stop.py",
     "coord_session_end.py",
 ]
@@ -96,6 +97,12 @@ _PAYLOAD_BASE_POR_HOOK = {
         "session_id": "sessao-teste",
         "file_path": "C:\\dev\\algum-repo\\arquivo.txt",
         "event": "change",
+    },
+    "coord_user_prompt.py": {
+        "hook_event_name": "UserPromptSubmit",
+        "session_id": "sessao-teste",
+        "prompt": "proximo pedido do Vinicius",
+        "cwd": "C:\\dev\\algum-repo",
     },
     "coord_stop.py": {
         "hook_event_name": "Stop",
@@ -136,10 +143,37 @@ def _run_hook(nome_arquivo: str, payload: dict, *, home: str, sessions_dir: str,
     return processo.returncode, processo.stdout
 
 
+# Hooks cujo contrato de saida e stdout ABSOLUTAMENTE VAZIO, nao "uma linha de
+# JSON". Hoje so o de inicio de turno: no `UserPromptSubmit` (e no
+# `UserPromptExpansion`) o harness monta `additionalContext` SOZINHO a partir de
+# qualquer stdout nao vazio com exit 0 -- entao ate um `{}` inocente viraria
+# texto injetado no contexto do modelo A CADA PROMPT do usuario. Lido no binario
+# 2.1.261 e registrado em medicao-hooks.md secao 5-bis.
+HOOKS_QUE_SAEM_MUDOS = {"coord_user_prompt.py"}
+
+
 def _unica_linha_json(saida: str) -> dict:
     linhas = [l for l in saida.splitlines() if l.strip()]
     assert len(linhas) == 1, f"esperava 1 linha de stdout, veio {len(linhas)}: {linhas!r}"
     return json.loads(linhas[0])
+
+
+def _saida_de_hook(nome_arquivo: str, saida: str) -> dict:
+    """Valida o stdout conforme o contrato DAQUELE hook, e devolve o objeto.
+
+    Nao e relaxamento do invariante -- e o invariante ficando especifico:
+    para os 8 hooks normais continua exigindo exatamente uma linha de JSON; para
+    os de `HOOKS_QUE_SAEM_MUDOS` passa a exigir stdout VAZIO, que antes nenhum
+    teste transversal cobria (achado MEDIA-5 da auditoria de 17/09: o hook novo
+    estava fora de `TODOS_OS_HOOKS` e escapava dos 5 invariantes).
+    """
+    if nome_arquivo in HOOKS_QUE_SAEM_MUDOS:
+        assert saida == "", (
+            f"{nome_arquivo} tem de sair com stdout VAZIO -- neste evento "
+            f"qualquer saida vira additionalContext no contexto do modelo. Veio: {saida!r}"
+        )
+        return {}
+    return _unica_linha_json(saida)
 
 
 def _write_session_file(sessions_dir: str, pid: int, dados: dict) -> None:
@@ -208,7 +242,7 @@ class TestExit0CaminhoNormal(_AmbienteTemporario):
                 payload = _PAYLOAD_BASE_POR_HOOK[nome]
                 codigo, saida = self.run_hook(nome, payload)
                 self.assertEqual(codigo, 0, f"{nome} saiu com exit {codigo}, saida={saida!r}")
-                obj = _unica_linha_json(saida)
+                obj = _saida_de_hook(nome, saida)
                 self.assertIsInstance(obj, dict)
 
     def test_payload_vazio_em_todos_os_hooks_nao_levanta(self):
@@ -217,7 +251,7 @@ class TestExit0CaminhoNormal(_AmbienteTemporario):
             with self.subTest(hook=nome):
                 codigo, saida = self.run_hook(nome, {})
                 self.assertEqual(codigo, 0)
-                obj = _unica_linha_json(saida)
+                obj = _saida_de_hook(nome, saida)
                 self.assertEqual(obj, {})
 
 
@@ -316,7 +350,7 @@ class TestExit0CaminhoDeExcecaoInterna(_AmbienteTemporario):
                 payload = _PAYLOAD_BASE_POR_HOOK[nome]
                 codigo, saida = self.run_hook(nome, payload, ccoord_src=caminho_inexistente)
                 self.assertEqual(codigo, 0, f"{nome} nao devia derrubar o processo: saida={saida!r}")
-                obj = _unica_linha_json(saida)
+                obj = _saida_de_hook(nome, saida)
                 self.assertEqual(obj, {})
                 self.assertNotIn("Traceback", saida)
 
@@ -329,7 +363,7 @@ class TestBootstrapDoPathSemCcoordSrc(_AmbienteTemporario):
                 payload = _PAYLOAD_BASE_POR_HOOK[nome]
                 codigo, saida = self.run_hook(nome, payload, ccoord_src=None)
                 self.assertEqual(codigo, 0)
-                _unica_linha_json(saida)  # so precisa nao levantar
+                _saida_de_hook(nome, saida)  # so precisa nao levantar
 
 
 # ---------------------------------------------------------------------------
@@ -1530,7 +1564,7 @@ class TestCcoordSrcApontandoParaDiretorioInexistenteCaiNoFallback(_AmbienteTempo
                 payload = _PAYLOAD_BASE_POR_HOOK[nome]
                 codigo, saida = self.run_hook(nome, payload, ccoord_src=caminho_quebrado)
                 self.assertEqual(codigo, 0)
-                _unica_linha_json(saida)  # nao levanta
+                _saida_de_hook(nome, saida)  # nao levanta
 
 
 class TestEcoNaoEngoleMudancaExternaLogoApos(_AmbienteTemporario):

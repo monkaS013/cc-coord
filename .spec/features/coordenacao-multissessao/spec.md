@@ -199,12 +199,14 @@ existe, liberado quando o turno acaba, e com a faixa onde o dono está agora.
 - **Então** nenhum dos três é removido
 - **E** o claim de turno do main desta sessão é removido na mesma passada
 
-#### AC-027 — Prompt que não veio do usuário não encerra turno nenhum
+#### AC-027 — Prompt enfileirado antes da entrega não encerra turno nenhum
 
-- **Dado** um `UserPromptSubmit` cuja origem não é o composer do usuário (`poll_event`, que dispara no enqueue, ou `system`, que inclui mensagem de peer e notificação de tarefa)
+- **Dado** um `UserPromptSubmit` com origem `poll_event`, que o binário documenta como disparado no enqueue — antes de existir o ack de entrega, portanto com o turno anterior possivelmente em andamento
 - **Quando** o hook de início de turno roda
-- **Então** nenhum claim é liberado, porque o turno anterior pode estar em andamento
-- **E** com origem do composer do usuário o release acontece normalmente
+- **Então** nenhum claim é liberado
+- **E** com origem do composer do usuário (`user`) o release acontece normalmente
+- **E** com o campo `source` ausente — o estado medido deste build — o release acontece normalmente, senão o hook seria instalado e inerte
+- **E** origem `system` (mensagem de peer, notificação de tarefa) TAMBÉM libera: medido no transcript que essas entradas viram turno próprio, com `promptId` e `Stop` próprios em sequência, então quando uma delas chega o turno anterior já terminou
 
 #### AC-026 — O hook de início de turno nunca bloqueia nem fala
 

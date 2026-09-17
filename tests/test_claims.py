@@ -244,6 +244,61 @@ class TestClaims(unittest.TestCase):
         self.assertIsNone(claims.owner_of("file:turno.txt", esta_vivo=lambda o: True))
         self.assertIsNotNone(claims.owner_of("resource:lease.txt", esta_vivo=lambda o: True))
 
+    def test_release_turn_do_main_ALCANCA_claim_de_subagente_por_padrao(self):
+        "o default agente_exato=False preserva o comportamento do Stop: o main libera o do subagente"
+        # Achado ALTA-3 da auditoria (17/09): flipar o default de `False` para
+        # `True` sobrevivia a 113 testes. Nada provava que o `Stop` e o
+        # `SessionEnd` continuavam alcancando claims de turno de subagente --
+        # e sem essa prova, alguem que passasse `agente_exato=True` no
+        # `coord_stop.py` "por simetria" faria os claims de subagente vazarem
+        # ate o TTL de 900 s, ressuscitando o falso-"colide" que a T-032
+        # existe para matar, com a suite inteira verde.
+        main = _owner("sessao-y", pid=os.getpid())
+        sub = _owner("sessao-y", pid=os.getpid(), agent_id="agente-7")
+        claims.claim(
+            "file:do-main.txt", main, 900, {"path": r"C:\dev\m.txt", "scope": "turn"},
+            esta_vivo=lambda o: True,
+        )
+        claims.claim(
+            "file:do-sub.txt", sub, 900, {"path": r"C:\dev\s.txt", "scope": "turn"},
+            esta_vivo=lambda o: True,
+        )
+
+        removidos = claims.release(main, scope="turn")
+
+        self.assertEqual(removidos, 2, "o release do Stop tem de levar os DOIS")
+        self.assertIsNone(claims.owner_of("file:do-main.txt", esta_vivo=lambda o: True))
+        self.assertIsNone(
+            claims.owner_of("file:do-sub.txt", esta_vivo=lambda o: True),
+            "claim de subagente sobreviveu ao release do main -- no Stop isso e "
+            "vazamento: o turno acabou para todos",
+        )
+
+    def test_release_turn_com_agente_exato_POUPA_o_subagente(self):
+        "agente_exato=True (inicio de turno) nao toca no claim de subagente"
+        # O outro lado do par. Sem os dois, um unico teste nao distingue
+        # "funciona" de "o parametro nao faz nada".
+        main = _owner("sessao-z", pid=os.getpid())
+        sub = _owner("sessao-z", pid=os.getpid(), agent_id="agente-9")
+        claims.claim(
+            "file:m2.txt", main, 900, {"path": r"C:\dev\m2.txt", "scope": "turn"},
+            esta_vivo=lambda o: True,
+        )
+        claims.claim(
+            "file:s2.txt", sub, 900, {"path": r"C:\dev\s2.txt", "scope": "turn"},
+            esta_vivo=lambda o: True,
+        )
+
+        removidos = claims.release(main, scope="turn", agente_exato=True)
+
+        self.assertEqual(removidos, 1, "levou mais que o claim do main")
+        self.assertIsNone(claims.owner_of("file:m2.txt", esta_vivo=lambda o: True))
+        self.assertIsNotNone(
+            claims.owner_of("file:s2.txt", esta_vivo=lambda o: True),
+            "apagou o claim do subagente: se ele for de background e ainda "
+            "estiver escrevendo, a peer que editar ali ouve 'sem sobreposicao'",
+        )
+
     def test_release_all_ignora_agent_id(self):
         "release(scope=all) varre a sessao inteira, mesmo entre agentes diferentes"
         dono_agente_1 = _owner("sessao-multi", pid=os.getpid(), agent_id="agente-1")

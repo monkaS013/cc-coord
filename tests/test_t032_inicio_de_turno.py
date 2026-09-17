@@ -205,6 +205,24 @@ class TestAC027OrigemQueNaoEncerraTurno(_Base):
             "demais e o hook virou inerte",
         )
 
+    def test_origem_system_libera(self):
+        """@spec:AC-027 origem `system` (mensagem de peer) libera: vira turno proprio"""
+        # Este teste existe porque o AC-027 dizia o CONTRARIO do codigo ate a
+        # auditoria de 17/09 pegar (achado ALTA-2): a primeira versao da spec
+        # foi escrita antes da medicao, listando `system` como "nao encerra
+        # turno". Medido depois no transcript: mensagem de peer e notificacao
+        # de tarefa geram `promptId` novo e `Stop` proprio, em SEQUENCIA -- ou
+        # seja, quando uma delas chega o turno anterior ja acabou de verdade.
+        # O texto do AC foi corrigido; este teste trava a regra medida.
+        _claim("file:alvo.md", _owner())
+        proc = self.rodar(self.payload(source="system"))
+        self.assertEqual(proc.returncode, 0, proc.stderr[:400])
+        self.assertFalse(
+            _existe("file:alvo.md"),
+            "nao liberou com `source=system` -- o filtro esta largo demais e "
+            "mensagem de peer deixaria o claim do turno anterior vazando",
+        )
+
     def test_campo_ausente_libera(self):
         """@spec:AC-027 sem o campo `source` (o estado deste build) o hook funciona"""
         # Medido em 17/09: este build NAO envia `source`. Se o filtro exigisse
@@ -350,6 +368,117 @@ class TestAchadosDaAuditoria(_Base):
             f"nenhuma linha de erro deste hook no events.log: {linhas!r}",
         )
         self.assertEqual(erros[-1].get("event"), "error")
+
+    def _src_falso_que_levanta(self) -> str:
+        """Monta um pacote `ccoord` falso cujo `release` LEVANTA.
+
+        Injetar falha de verdade e o unico jeito de exercitar o `except` do
+        hook a partir de um subprocesso -- `ler_payload()` nunca levanta (por
+        desenho: devolve `{}` para qualquer lixo), entao nenhum payload hostil
+        chega la dentro. Foi exatamente por isso que o mutante `return 2` no
+        topo do `except` SOBREVIVEU aos 10 testes anteriores (achado ALTA-1 da
+        auditoria de 17/09): o ramo existia, estava certo, e nada o cobria.
+
+        O `_bootstrap_src_path` do hook aceita qualquer `CCOORD_SRC` que tenha
+        um diretorio `ccoord` dentro -- e por essa porta que o falso entra.
+        """
+        src = os.path.join(self.tmp, "src_falso")
+        pkg = os.path.join(src, "ccoord")
+        os.makedirs(pkg, exist_ok=True)
+        with open(os.path.join(pkg, "__init__.py"), "w", encoding="utf-8") as fh:
+            fh.write(
+                "import json, sys\n"
+                "class _Hookio:\n"
+                "    @staticmethod\n"
+                "    def ler_payload():\n"
+                "        try:\n"
+                "            return json.load(sys.stdin)\n"
+                "        except Exception:\n"
+                "            return {}\n"
+                "    @staticmethod\n"
+                "    def identidade(payload):\n"
+                "        class O:\n"
+                "            session_id = 'sessao-dona'\n"
+                "            agent_id = None\n"
+                "        return O()\n"
+                "class _Claims:\n"
+                "    @staticmethod\n"
+                "    def release(*a, **k):\n"
+                "        raise RuntimeError('falha injetada no release')\n"
+                "hookio = _Hookio()\n"
+                "claims = _Claims()\n"
+            )
+        return src
+
+    def test_excecao_no_release_nao_bloqueia_o_prompt(self):
+        """@spec:AC-026 se o `release` LEVANTAR, o hook ainda sai 0 e calado"""
+        # Este e o cenario que de fato importa em producao: `claims.release`
+        # varre diretorio e remove arquivo -- disco cheio, permissao negada e
+        # estado corrompido levantam ali. Sair com codigo != 0 nao e detalhe:
+        # **exit 2 BLOQUEIA o prompt do usuario** ("Prompt blocked: the
+        # UserPromptSubmit hooks did not run over the submitted text").
+        env = dict(os.environ)
+        env["CCOORD_HOME"] = self.home
+        env["CCOORD_SESSIONS_DIR"] = self.sessions
+        env["CCOORD_SRC"] = self._src_falso_que_levanta()
+
+        proc = subprocess.run(
+            [PYTHON, str(HOOKS / HOOK)],
+            input=json.dumps(self.payload()),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            timeout=30,
+        )
+
+        self.assertEqual(
+            proc.returncode,
+            0,
+            f"o hook saiu com {proc.returncode} -- qualquer codigo != 0 suja a "
+            "tela do usuario, e 2 BLOQUEIA o prompt. stderr: {proc.stderr[:300]}",
+        )
+        self.assertEqual(proc.stdout, "", "falou no stdout ao falhar")
+
+        # E a falha tem de deixar rastro (A4), senao vira silencio indistinguivel
+        log = os.path.join(self.home, "events.log")
+        self.assertTrue(os.path.isfile(log), "exceção no release nao registrou nada")
+        with open(log, "r", encoding="utf-8") as fh:
+            erros = [
+                json.loads(l)
+                for l in fh
+                if l.strip() and json.loads(l).get("origem") == "coord_user_prompt"
+            ]
+        self.assertTrue(erros, "nenhuma linha de erro apesar da excecao")
+        self.assertIn("falha injetada", erros[-1].get("erro", ""))
+
+    def test_nao_vacuidade_o_src_falso_realmente_e_usado(self):
+        """@spec:AC-026 controle: o pacote falso e MESMO importado pelo hook"""
+        # Sem isto, o teste acima passaria mesmo que o `CCOORD_SRC` falso fosse
+        # ignorado e o hook rodasse o caminho feliz com o pacote real -- exit 0
+        # e stdout vazio sao o esperado NOS DOIS casos. O que distingue e o
+        # claim: com o release levantando, ele TEM de sobreviver.
+        _claim("file:alvo.md", _owner())
+        env = dict(os.environ)
+        env["CCOORD_HOME"] = self.home
+        env["CCOORD_SESSIONS_DIR"] = self.sessions
+        env["CCOORD_SRC"] = self._src_falso_que_levanta()
+
+        proc = subprocess.run(
+            [PYTHON, str(HOOKS / HOOK)],
+            input=json.dumps(self.payload()),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            timeout=30,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr[:300])
+        self.assertTrue(
+            _existe("file:alvo.md"),
+            "o claim foi liberado -- ou seja, o pacote REAL rodou e o `src` "
+            "falso foi ignorado; o teste de excecao nao prova nada",
+        )
 
     def test_nao_vacuidade_caminho_feliz_nao_polui_o_log_de_erro(self):
         """@spec:AC-026 controle: execucao normal NAO grava linha de erro"""
