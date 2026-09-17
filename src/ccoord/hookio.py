@@ -243,7 +243,37 @@ def _truncar(texto: str, max_chars: int, max_linhas: int) -> str:
 
 
 def _imprimir(obj: dict) -> None:
-    print(json.dumps(obj, ensure_ascii=False))
+    """Emite o JSON do hook em ASCII puro (T-035).
+
+    `ensure_ascii=True` NAO e detalhe de estilo aqui: o stdout do hook e um
+    PIPE, e nesta maquina `sys.stdout.encoding` em pipe e **cp1252**, nao
+    UTF-8. Com `ensure_ascii=False` os acentos saem como bytes cp1252
+    (`sess\\xe3o`, `\\xc1rea`, travessao = `\\x97`), que nao sao UTF-8 valido --
+    e TODA razao desta feature tem acento, inclusive os caminhos do vault
+    ("Inteligencia de Mercado", "Area de Trabalho").
+
+    Medido em 17/09 num experimento PAREADO (`tools/probe/run_probe5.sh`, dois
+    `deny` com a MESMA razao, mudando so o `ensure_ascii`), lendo o transcript
+    em vez de perguntar ao modelo:
+
+      ensure_ascii=False -> "ENCPROBE FALSE: a sess�o home est� na �rea ..."
+      ensure_ascii=True  -> "ENCPROBE TRUE: a sessao home esta na Area ..." (integro)
+
+    Os DOIS bloquearam: o harness decodifica com substituicao, entao o JSON
+    ainda e parseado e o `deny` NAO fica mudo -- a hipotese de "gate mudo por
+    encoding", que eu tinha levantado como pior caso, foi **refutada pela
+    medicao neste build**. O dano real e o aviso chegar ilegivel a peer, e o
+    caminho de arquivo citado nele deixar de bater com o arquivo real.
+
+    Escrita em ARQUIVO (events.log, claims) nao tem o problema: la o
+    `.encode("utf-8")` e explicito. O furo e o `print()`.
+
+    Nota de metodo: o defeito nunca nasce por descuido -- o default de
+    `json.dumps` ja e `True`. Ele nasce quando alguem escreve `False` de
+    proposito achando que deixa a saida mais legivel. Em hook a saida nao e
+    para humano ler, e para o harness parsear.
+    """
+    print(json.dumps(obj, ensure_ascii=True))
 
 
 def emitir_silencio() -> None:
