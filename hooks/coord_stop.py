@@ -126,13 +126,30 @@ def main() -> int:
         #    E, pior, liberava o recurso para uma peer com o dono VIVO
         #    trabalhando. Trocar exclusao por limpeza e o negocio errado.
         #
-        # O que estava errado era a PREMISSA de 1: claim de turno vazado nao
-        # bloqueia ninguem. Passados os 900 s de TTL ele fica inerte --
-        # `coord_session_start.py` pula expirado ao montar o mapa e `policy` so
-        # consulta dono vivo e nao expirado. O dano real era acumulo de arquivo
-        # em disco, e quem resolve isso e o `claims.sweep()` do SessionStart
-        # (AC-022), sem tocar em exclusao. Entao aqui volta a regra simples:
-        # reentrada nao mexe em claim nenhum.
+        # O que estava errado era a PREMISSA de 1 -- mas nao do jeito que eu
+        # escrevi aqui na primeira versao deste comentario, e a 4a auditoria
+        # corrigiu: dizer que "claim vazado fica inerte porque expira" e FALSO.
+        # Os 9 consumidores de fato filtram expirado, mas o claim vazado NAO
+        # CHEGA a expirar -- ele e renovado a cada edicao, e o intervalo entre
+        # duas edicoes do mesmo recurso tem mediana de 79,4 s contra um TTL de
+        # 900 s. Ele sobrevive, e as faixas ACUMULAM entre turnos.
+        #
+        # Consequencia medida (nao hipotetica): a peer que edita uma faixa que
+        # eu terminei no turno PASSADO recebe "colide, mande SendMessage
+        # AGORA"; e passados 32 turnos o teto de faixas estoura e o claim
+        # degrada para arquivo inteiro, fazendo qualquer edicao colidir. E o
+        # espelho exato da T-026 -- alarme falso em vez de silencio indevido.
+        # Custo = RUIDO, nunca bloqueio: isto e `warn`, e `browser`/`bind` sao
+        # scope="session" (nunca saem por release de turno) e `git` decide por
+        # peer no repo, sem olhar claim.
+        #
+        # Entao a regra simples abaixo (reentrada nao mexe em claim) esta certa
+        # pelo motivo de nao quebrar o turno em andamento -- nao porque o
+        # vazamento seja inofensivo. O vazamento entre TURNOS continua aberto,
+        # e a saida provavel e liberar no inicio do turno seguinte
+        # (UserPromptSubmit), onde da para saber que o anterior acabou. Isso
+        # exige spec propria; nao improvisar aqui, esta linha ja foi reescrita
+        # errada tres vezes em 17/09.
         if not payload.get("stop_hook_active"):
             try:
                 dono = hookio.identidade(payload)

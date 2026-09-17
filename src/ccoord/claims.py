@@ -876,30 +876,6 @@ def release(owner: Owner, scope: str) -> int:
     return removidos
 
 
-def _sobrescrever_se_ainda_e_o_mesmo(fpath: str, esperado: Claim, novo: Claim) -> bool:
-    """Grava `novo` só se o arquivo ainda contém o claim `esperado`."""
-    atual = _read_claim_file(fpath)
-    if atual is None:
-        return False
-    if (
-        atual.owner.session_id != esperado.owner.session_id
-        or atual.owner.pid != esperado.owner.pid
-        or atual.owner.proc_start != esperado.owner.proc_start
-        or atual.acquired_at != esperado.acquired_at
-    ):
-        return False
-    dados = json.dumps(novo.to_dict(), ensure_ascii=False).encode("utf-8")
-    try:
-        fd = os.open(fpath, os.O_WRONLY | os.O_TRUNC)
-    except OSError:
-        return False
-    try:
-        os.write(fd, dados)
-    finally:
-        os.close(fd)
-    return True
-
-
 def release_resource(resource: str, owner: Owner) -> bool:
     """Libera UM recurso especifico, se ele ainda for do `owner`. True se saiu.
 
