@@ -275,5 +275,102 @@ class TestAC026NuncaBloqueiaNemFala(_Base):
         self.assertFalse(_existe("file:alvo.md"))
 
 
+class TestAchadosDaAuditoria(_Base):
+    """A3 e A4 da auditoria adversarial de 17/09 sobre este mesmo hook."""
+
+    def test_agent_id_vazio_nao_deixa_o_hook_inerte(self):
+        """@spec:AC-024 `agent_id` vazio no payload nao impede o release (A3)"""
+        # `""` e `None` sao ambos "sem agente", mas so `None` casa na comparacao
+        # de `agente_exato`. Sem a normalizacao em `hookio.identidade`, um
+        # payload com `agent_id: ""` deixaria o hook INERTE e MUDO: sem apagar
+        # nada e sem dizer por que.
+        _claim("file:alvo.md", _owner())
+        proc = self.rodar(self.payload(agent_id=""))
+        self.assertEqual(proc.returncode, 0, proc.stderr[:400])
+        self.assertFalse(
+            _existe("file:alvo.md"),
+            "`agent_id: \"\"` deixou o hook inerte -- o dono do claim tem "
+            "agent_id None e o pedinte ficou com \"\", que nao casa",
+        )
+
+    def test_nao_vacuidade_agent_id_real_continua_poupando_subagente(self):
+        """@spec:AC-025 controle: `agent_id` de verdade continua sendo respeitado"""
+        # Contraprova da normalizacao acima: ela nao pode ter transformado
+        # "agente de verdade" em "sem agente", senao o A3 viraria o defeito que
+        # o AC-025 existe para impedir.
+        _claim("file:do-subagente.md", _owner(agent_id="agente-7"))
+        proc = self.rodar(self.payload(agent_id="agente-9"))
+        self.assertEqual(proc.returncode, 0, proc.stderr[:400])
+        self.assertTrue(
+            _existe("file:do-subagente.md"),
+            "a normalizacao de agent_id colapsou agentes distintos",
+        )
+
+    def test_falha_de_import_deixa_rastro_no_events_log(self):
+        """@spec:AC-026 fail-open registra o erro em vez de sumir calado (A4)"""
+        # Cenario provado pela auditoria: `CCOORD_SRC` apontando para lugar
+        # inexistente -> `import ccoord` falha. Antes: rc 0, stdout vazio,
+        # claim intacto e NENHUMA linha em lugar nenhum -- indistinguivel de
+        # "rodou e nao havia o que fazer".
+        _claim("file:alvo.md", _owner())
+
+        env = dict(os.environ)
+        env["CCOORD_HOME"] = self.home
+        env["CCOORD_SESSIONS_DIR"] = self.sessions
+        env["CCOORD_SRC"] = os.path.join(self.tmp, "nao-existe")
+        # Sem o fallback relativo ao proprio arquivo, o hook copiado acharia o
+        # `src/` do repo; copio o hook para fora da arvore para que o unico
+        # caminho de import seja o CCOORD_SRC quebrado.
+        import shutil
+
+        hook_isolado = os.path.join(self.tmp, "coord_user_prompt.py")
+        shutil.copy2(HOOKS / HOOK, hook_isolado)
+
+        proc = subprocess.run(
+            [PYTHON, hook_isolado],
+            input=json.dumps(self.payload()),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            timeout=30,
+        )
+
+        self.assertEqual(proc.returncode, 0, "fail-open quebrou o prompt do usuario")
+        self.assertEqual(proc.stdout, "", "fail-open falou no stdout")
+        self.assertTrue(_existe("file:alvo.md"), "liberou claim apesar de ter quebrado")
+
+        log = os.path.join(self.home, "events.log")
+        self.assertTrue(os.path.isfile(log), "nao registrou NADA no events.log")
+        with open(log, "r", encoding="utf-8") as fh:
+            linhas = [json.loads(l) for l in fh if l.strip()]
+        erros = [l for l in linhas if l.get("origem") == "coord_user_prompt"]
+        self.assertTrue(
+            erros,
+            f"nenhuma linha de erro deste hook no events.log: {linhas!r}",
+        )
+        self.assertEqual(erros[-1].get("event"), "error")
+
+    def test_nao_vacuidade_caminho_feliz_nao_polui_o_log_de_erro(self):
+        """@spec:AC-026 controle: execucao normal NAO grava linha de erro"""
+        # Sem isto, o teste acima passaria com um hook que registra erro sempre
+        # -- e o log de erro perderia todo o valor de sinal.
+        _claim("file:alvo.md", _owner())
+        proc = self.rodar(self.payload())
+        self.assertEqual(proc.returncode, 0, proc.stderr[:400])
+
+        log = os.path.join(self.home, "events.log")
+        erros = []
+        if os.path.isfile(log):
+            with open(log, "r", encoding="utf-8") as fh:
+                for l in fh:
+                    if not l.strip():
+                        continue
+                    d = json.loads(l)
+                    if d.get("origem") == "coord_user_prompt":
+                        erros.append(d)
+        self.assertEqual(erros, [], "caminho feliz gravou erro no events.log")
+
+
 if __name__ == "__main__":
     unittest.main()

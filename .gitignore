@@ -5,3 +5,6 @@ tools/probe/debug*.log
 tools/probe/resposta*.txt
 tools/probe/alvo.txt
 .spec/verification/*.json
+
+# worktrees de subagente (isolamento de mutacao) -- nunca versionar
+.claude/worktrees/
