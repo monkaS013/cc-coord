@@ -159,7 +159,23 @@ wakeup legítimo custa esperar o próximo prompt (status quo); liberar no meio d
 faixa de quem está escrevendo. **Mas o campo é opcional e está em rollout**: se este build não o
 enviar no composer interativo, a regra torna o hook inerte. É a primeira coisa que a T-030 mede.
 
-### 2. O evento PODE disparar dentro de subagente
+### 2-bis. MEDIDO: ele NÃO dispara dentro de subagente (probe 6, 17/09)
+
+A leitura do binário (§2 abaixo) diz que existe um produtor com `agentId`. **Medido em runtime, não
+acontece neste build**: sessão headless que lançou um subagente `general-purpose` produziu **um único**
+`UserPromptSubmit` — o do prompt do usuário, com `agent_id` ausente.
+
+Controle negativo presente, e é o que dá valor à medida: o `SubagentStart` foi capturado
+(`agent_id: a49141e7d48f4ac4a`, `agent_type: general-purpose`), provando que o subagente de fato
+rodou. Sem esse controle, "uma captura só" seria indistinguível de "o subagente nunca existiu".
+
+Isso **refuta o achado A1 da auditoria** (se o evento disparasse em subagente e o payload não trouxesse
+`agent_id`, `agente_exato=True` compararia `None == None` e o hook apagaria o claim do main com o turno
+vivo). Fica como dívida declarada, não conserto: o código do binário sugere que o caminho existe, então
+se um build futuro passar a disparar, o defeito volta — e a defesa custa uma linha. Reavaliar ao
+atualizar o CLI.
+
+### 2. O evento PODE disparar dentro de subagente (leitura do binário)
 
 Existem dois produtores. Um ignora agente; o outro resolve o alvo como `r.agentId ?? r.session.id` e
 monta o payload com `agent_id` preenchido (o payload base dos hooks inclui `session_id`,

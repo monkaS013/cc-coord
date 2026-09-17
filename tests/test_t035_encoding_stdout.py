@@ -41,6 +41,9 @@ RAIZ = Path(__file__).resolve().parents[1]
 SRC = RAIZ / "src"
 PYTHON = sys.executable
 
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
 # Caminho REAL desta maquina, nao um acento inventado: o vault e a pasta de
 # memoria sao os dois hotspots medidos de colisao, e os dois tem acento.
 TEXTO = "peer home editou C:/Oscar Alho/Projetos/Inteligência de Mercado.md — colisão"
@@ -110,6 +113,117 @@ class TestEncodingDoStdout(unittest.TestCase):
             UnicodeDecodeError,
             msg="esperava bytes invalidos em UTF-8 no lado sem ensure_ascii",
         ):
+            proc.stdout.decode("utf-8")
+
+
+class TestEncodingDoCliJson(unittest.TestCase):
+    """O `--json` do CLI tem o MESMO contrato de bytes que o hook.
+
+    Residuo encontrado pela auditoria adversarial sobre o conserto do
+    `hookio._imprimir`: o conserto tratou o hook e deixou CINCO `print(
+    json.dumps(..., ensure_ascii=False))` no `cli.py`. O `--json` existe
+    justamente para consumo programatico (`ccoord status --json | ...`), que e
+    onde o stdout E um pipe -- cp1252 nesta maquina.
+
+    Por que `tests/test_cli.py` nunca poderia pegar isto: o helper `_run` de la
+    usa `redirect_stdout(io.StringIO())`, e StringIO nao tem encoding -- a
+    string em Python e a mesma com `ensure_ascii` True ou False. O teste nao
+    estava fraco por descuido; ele era CEGO POR CONSTRUCAO para esta classe de
+    defeito. So um subprocesso de verdade, lendo bytes, enxerga.
+    """
+
+    def _rodar_cli(self, *args) -> subprocess.CompletedProcess:
+        import tempfile
+
+        env = dict(os.environ)
+        env.pop("PYTHONIOENCODING", None)
+        env["PYTHONPATH"] = str(SRC)
+        # Estado proprio em tempfile: NUNCA `~/.claude/coord`, que e o estado
+        # vivo de varias sessoes desta maquina.
+        env["CCOORD_HOME"] = self.home
+        env["CCOORD_SESSIONS_DIR"] = self.sessions
+        return subprocess.run(
+            [PYTHON, "-m", "ccoord.cli", *args],
+            capture_output=True,  # bytes, nao texto
+            env=env,
+            timeout=30,
+        )
+
+    def setUp(self):
+        import tempfile
+
+        self.tmp = tempfile.mkdtemp(prefix="ccoord_t035cli_")
+        self.home = os.path.join(self.tmp, "coord")
+        self.sessions = os.path.join(self.tmp, "sessions")
+        os.makedirs(self.home, exist_ok=True)
+        os.makedirs(self.sessions, exist_ok=True)
+
+        # Um claim com acento no caminho, que e o caso REAL (vault e pasta de
+        # memoria sao os hotspots medidos de colisao).
+        self._antigo = os.environ.get("CCOORD_HOME")
+        os.environ["CCOORD_HOME"] = self.home
+        from ccoord import claims
+
+        self.path_com_acento = "C:/Oscar Alho/Projetos/Inteligência de Mercado.md"
+        dono = claims.Owner(
+            session_id="sessao-acentuada",
+            pid=os.getpid(),
+            proc_start="",
+            name="sessão home — Área de Trabalho",
+        )
+        r = claims.claim(
+            "file:" + self.path_com_acento,
+            dono,
+            ttl_s=900,
+            meta={"path": self.path_com_acento, "range": (1, 5), "scope": "turn"},
+            esta_vivo=lambda o: True,
+        )
+        assert r.ok, "fixture nao criou o claim"
+
+    def tearDown(self):
+        if self._antigo is None:
+            os.environ.pop("CCOORD_HOME", None)
+        else:
+            os.environ["CCOORD_HOME"] = self._antigo
+
+    def test_status_json_sai_em_ascii_puro(self):
+        """@spec:AC-012 `status --json` sai em ASCII puro, com acento nos dados"""
+        proc = self._rodar_cli("status", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr[:400])
+        nao_ascii = [b for b in proc.stdout if b > 127]
+        self.assertEqual(
+            nao_ascii,
+            [],
+            "`status --json` emitiu byte nao-ASCII: em pipe (cp1252) isso deixa "
+            f"de ser UTF-8 valido. Bytes: {proc.stdout[:160]!r}",
+        )
+
+    def test_status_json_e_parseavel_como_utf8_e_preserva_acento(self):
+        """@spec:AC-012 o consumidor do `--json` le UTF-8 e recupera o acento intacto"""
+        proc = self._rodar_cli("status", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr[:400])
+        # E assim que um consumidor programatico le: decodifica UTF-8 e parseia.
+        dados = json.loads(proc.stdout.decode("utf-8"))
+        texto = json.dumps(dados, ensure_ascii=False)
+        self.assertIn("Inteligência de Mercado", texto)
+        self.assertNotIn("\ufffd", texto)
+
+    def test_nao_vacuidade_o_ambiente_do_teste_expoe_o_defeito(self):
+        """@spec:AC-012 controle: neste mesmo ambiente, ensure_ascii=False QUEBRA"""
+        env = dict(os.environ)
+        env.pop("PYTHONIOENCODING", None)
+        proc = subprocess.run(
+            [PYTHON, "-c", f"import json;print(json.dumps({{'p': {self.path_com_acento!r}}}, ensure_ascii=False))"],
+            capture_output=True,
+            env=env,
+            timeout=30,
+        )
+        self.assertTrue(
+            any(b > 127 for b in proc.stdout),
+            "o ambiente deste teste nao reproduz a condicao real (stdout ja e "
+            "UTF-8?) -- entao os dois testes acima nao provam nada",
+        )
+        with self.assertRaises(UnicodeDecodeError):
             proc.stdout.decode("utf-8")
 
 

@@ -191,7 +191,14 @@ def identidade(payload: Optional[dict]) -> Owner:
     """
     payload = payload or {}
     session_id = str(payload.get("session_id") or os.environ.get("CLAUDE_CODE_SESSION_ID") or "")
-    agent_id = payload.get("agent_id")
+    # `agent_id` FALSY (string vazia, 0, lista vazia) normaliza para None --
+    # "sem agente" tem de ter UMA representacao so. O `session_id` acima ja
+    # fazia isso pelo `or ""`; o `agent_id` nao fazia, e a assimetria criava um
+    # dono que nao casa com ninguem: `""` != `None` em `_same_owner_identity` e
+    # na comparacao `agente_exato` do `claims.release`, entao um payload com
+    # `agent_id: ""` deixaria o release de inicio de turno inerte -- sem apagar
+    # nada e sem dizer por que. Achado por auditoria adversarial em 17/09.
+    agent_id = payload.get("agent_id") or None
 
     pid = 0
     proc_start = ""

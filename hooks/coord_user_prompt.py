@@ -54,13 +54,54 @@ ja terminou de verdade, e liberar ali esta certo.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
+import time
 
 # Origens que NAO significam "o turno anterior acabou". Hoje o campo nem vem no
 # payload; isto e defesa para quando vier. Manter curta e justificada: cada
 # nome aqui e um caso em que o release seria feito no meio de um turno vivo.
 _ORIGENS_QUE_NAO_ENCERRAM_TURNO = frozenset({"poll_event"})
+
+
+def _registrar_erro_local(exc: BaseException) -> None:
+    """Grava uma linha de erro no `events.log` SEM depender do pacote `ccoord`.
+
+    Por que nao usar `hookio._registrar_erro`, que ja existe: o cenario que a
+    auditoria provou (17/09) e justamente `CCOORD_SRC` quebrado -- e ai o
+    `import ccoord` falhou e nao ha `hookio` para chamar. Telemetria que
+    depende do que pode ter quebrado nao e telemetria.
+
+    O sintoma sem isto era o pior possivel: o hook saia com rc 0, stdout vazio,
+    o claim sobrevivia e **nenhuma linha em lugar nenhum** -- silencio
+    indistinguivel de "rodou e nao havia nada a fazer". Este era o unico dos 9
+    entrypoints sem registro no fail-open.
+
+    Best-effort e mudo por definicao: se ATE isto falhar, engole. E escreve em
+    ARQUIVO com `.encode("utf-8")` explicito, nunca no stdout -- neste evento
+    qualquer stdout nao vazio vira `additionalContext` no contexto do modelo.
+    """
+    try:
+        home = os.environ.get("CCOORD_HOME") or os.path.join(
+            os.path.expanduser("~"), ".claude", "coord"
+        )
+        os.makedirs(home, exist_ok=True)
+        linha = {
+            "ts": int(time.time() * 1000),
+            "event": "error",
+            "origem": "coord_user_prompt",
+            "hook_event_name": "UserPromptSubmit",
+            "erro": repr(exc),
+        }
+        caminho = os.path.join(home, "events.log")
+        fd = os.open(caminho, os.O_CREAT | os.O_WRONLY | os.O_APPEND)
+        try:
+            os.write(fd, (json.dumps(linha, ensure_ascii=True) + "\n").encode("utf-8"))
+        finally:
+            os.close(fd)
+    except Exception:
+        pass
 
 
 def _bootstrap_src_path() -> None:
@@ -92,11 +133,13 @@ def main() -> int:
             return 0
 
         claims.release(dono, scope="turn", agente_exato=True)
-    except Exception:
+    except Exception as exc:
         # Fail-open (RNF-02): o prompt do usuario nunca para por causa deste
-        # hook. Silencio deliberado -- nada de stderr, que em exit 0 o harness
-        # nao mostra, mas tambem nao ajuda ninguem aqui.
-        pass
+        # hook -- mas fail-open CALADO esconde o defeito (achado da auditoria
+        # de 17/09). Silencio na SAIDA, registro no events.log: quem investiga
+        # depois precisa distinguir "rodou e nao havia o que liberar" de
+        # "quebrou e ninguem soube".
+        _registrar_erro_local(exc)
     return 0
 
 

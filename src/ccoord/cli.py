@@ -42,6 +42,27 @@ __all__ = ["main"]
 _MAX_PARALLEL_WORKERS = 16
 
 
+def _print_json(obj: dict, *, indent: int | None = None) -> None:
+    """Imprime JSON do `--json` em ASCII puro. Ponto UNICO de saida JSON do CLI.
+
+    Mesmo motivo do `hookio._imprimir` (T-035), e este era o residuo que sobrou
+    daquele conserto: quando a saida do CLI vai para um PIPE -- que e o caso de
+    todo consumo programatico, `ccoord status --json | ...` --, o
+    `sys.stdout.encoding` desta maquina e **cp1252**, nao UTF-8. Com
+    `ensure_ascii=False` os acentos viram bytes cp1252 e o JSON deixa de ser
+    UTF-8 valido; quem fizer `json.loads(saida.decode("utf-8"))` recebe
+    `UnicodeDecodeError`. E os dados do CLI TEM acento: caminho do vault
+    ("Inteligencia de Mercado"), "Area de Trabalho", nome de sessao.
+
+    Com `ensure_ascii=True` o conteudo e identico apos o parse (escapes
+    `\\uXXXX` sao a mesma string), e a saida passa a ser valida em qualquer
+    encoding. Funcao unica de proposito para que o proximo comando `--json`
+    nao repita a escolha -- foram CINCO ocorrencias espalhadas quando isto foi
+    corrigido.
+    """
+    print(json.dumps(obj, ensure_ascii=True, indent=indent))
+
+
 # ---------------------------------------------------------------------------
 # Leitura do estado de claims (contrato documentado, nao API privada)
 # ---------------------------------------------------------------------------
@@ -384,7 +405,7 @@ def cmd_status(args: argparse.Namespace) -> int:
                 _claim_to_dict(c, agora_ms, False) for c in pendentes_sweep
             ],
         }
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        _print_json(payload, indent=2)
         return 0
 
     print("SESSOES VIVAS")
@@ -457,7 +478,7 @@ def cmd_who(args: argparse.Namespace) -> int:
 
     if args.json:
         payload = {"recurso": alvo, "claims": [_claim_to_dict(c, agora_ms, True) for c in achados]}
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        _print_json(payload, indent=2)
         return 0
 
     if not achados:
@@ -486,7 +507,7 @@ def cmd_release(args: argparse.Namespace) -> int:
             "(defina CLAUDE_CODE_SESSION_ID ou rode dentro do Claude Code)."
         )
         if args.json:
-            print(json.dumps({"ok": False, "erro": msg}, ensure_ascii=False))
+            _print_json({"ok": False, "erro": msg})
         else:
             print(msg)
         return 1
@@ -494,12 +515,7 @@ def cmd_release(args: argparse.Namespace) -> int:
     removidos = claims.release(dono, scope="session")
 
     if args.json:
-        print(
-            json.dumps(
-                {"ok": True, "session_id": dono.session_id, "removidos": removidos},
-                ensure_ascii=False,
-            )
-        )
+        _print_json({"ok": True, "session_id": dono.session_id, "removidos": removidos})
         return 0
 
     nome = dono.name or dono.session_id
@@ -517,7 +533,7 @@ def cmd_sweep(args: argparse.Namespace) -> int:
     removidos = claims.sweep(esta_vivo=esta_vivo)
 
     if args.json:
-        print(json.dumps({"removidos": removidos}, ensure_ascii=False))
+        _print_json({"removidos": removidos})
         return 0
 
     if removidos == 0:
