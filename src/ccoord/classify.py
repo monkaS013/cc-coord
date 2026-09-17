@@ -881,8 +881,19 @@ def _tokens_respeitando_aspas(texto: str) -> list:
          auditoria de 17/09; 136 arquivos desta maquina tem apostrofo no
          caminho, como `NF's Megacomm x Belenus\\34773.pdf`). A protecao 2 nao
          cobria: com numero PAR de apostrofos a degradacao nunca disparava.
-         Esta e a regra do shell de verdade -- `it's` no meio de uma palavra
-         nao inicia citacao.
+         ⚠️ CORRECAO DA 4a AUDITORIA: "esta e a regra do shell de verdade" e
+         FALSO, e a frase fica aqui so para nao ser reescrita de novo. No
+         POSIX a aspa abre citacao em QUALQUER posicao -- medido no Git Bash,
+         `a'b'c/d.md` chega ao programa como `abc/d.md`. Quem reproduzia o
+         shell era o tokenizador ANTIGO; este diverge dele em 5 de 260 casos
+         medidos (ex.: `tee a'b'c/d.md` passa a reivindicar `a'b'c\d.md`, um
+         arquivo que ninguem toca = falso negativo). Alem disso, o caso que
+         motivou a mudanca nao executa assim no bash: ele pareia os apostrofos
+         de `Bob's`/`Ana's` num argumento so, igual a versao antiga.
+         PENDENTE: decidir entre reverter (fidelidade ao POSIX) ou manter
+         (nome de arquivo com apostrofo e comum nesta maquina e o Bash do
+         harness nem sempre e a origem do comando) -- com medicao limpa do
+         parsing, em sessao propria. Nao mexer aqui sem essa medicao.
     """
     texto = texto.strip()
     tokens: list = []
