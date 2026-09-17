@@ -1,5 +1,31 @@
 # Como retomar a feature cc-coord
 
+> **Atualização 17/09/2026, noite — pendência 1 IMPLEMENTADA e verificada; falta só INSTALAR.**
+> 348 testes verdes, `onp-spec verify` 27/27 com prova PASS, `audit --ci` limpo. T-030 a T-032, T-035
+> e T-036 concluídas. **O que falta é a T-033: a instalação, que escreve no `settings.json` global e
+> afeta todas as sessões abertas — fronteira de aprovação, igual à T-012.** O hook novo
+> (`hooks/coord_user_prompt.py`) está no `HOOKS_SPECS`, então `ccoord install` já o inclui: são 9
+> hooks agora, não 8.
+> Também consertado: **T-035** (o JSON do hook saía em cp1252 — todo aviso acentuado chegava ilegível
+> à peer) e **T-036** (gate RNF-04 com N=60 em vez de 20, sem tocar no limite de 150 ms).
+>
+> **Atualização anterior (17/09, fim da tarde) — pendência 1 especificada, nada implementado.**
+> Ler nesta ordem: `medicao-fronteira-de-turno.md` (o tamanho real do problema),
+> `spec-release-no-inicio-do-turno.md` (a spec) e `medicao-hooks.md §5-bis` (quatro fatos sobre o
+> `UserPromptSubmit` lidos no binário). Tasks T-030 a T-034 em `.spec/.../tasks.md`, todas pendentes.
+> **A próxima é a T-030, que é uma MEDIÇÃO, não código** — a leitura do binário já refutou a ASM-008 e
+> metade da ASM-007, e escrever o hook antes de medir o resto é a quarta tentativa errada.
+> `onp-spec audit --ci`: 4 erros, todos `AC_SEM_TESTE` dos ACs novos (24, 25, 26, 27) — é o gate
+> cobrando o que ainda não foi feito, não regressão. Suíte: 335 testes; o único vermelho é o gate de
+> perf RNF-04 com n=20, que passa 3/3 isolado e reprova sob carga (piso do interpretador em 54,6 ms
+> contra os 31 ms normais).
+>
+> 🔴 **Achado fora da pendência 1, e mais urgente que ela: T-035.** O stdout de hook em pipe sai em
+> cp1252 nesta máquina e `hookio._imprimir` usa `ensure_ascii=False` — todo aviso com acento (que são
+> todos) sai em bytes inválidos em UTF-8. Medido aqui em runtime, depois do aviso da peer
+> `home-piped-liskov`, que viu o texto chegar corrompido ao modelo no hook dela. Conserto é uma linha;
+> o que falta é medir se o harness corrompe o texto ou perde o JSON inteiro (aí o `deny` fica mudo).
+
 > **Atualização 17/09/2026 — a feature está INSTALADA e em uso desde 12/09.** O corpo deste arquivo
 > abaixo é de 11/09 e descreve a fase anterior (código pronto, nada instalado); vale como histórico.
 > O estado de hoje: T-001 a T-026 concluídas, 322 testes, `onp-spec verify` 23/23 com prova PASS,

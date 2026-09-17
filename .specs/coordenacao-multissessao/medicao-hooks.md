@@ -125,6 +125,71 @@ processo** — é a diferença entre o gate funcionar e o gate parecer que funci
 
 ---
 
+## 5-bis. `UserPromptSubmit` — quatro fatos lidos no binário (17/09, build 2.1.261)
+
+⚠️ **Lido no binário, NÃO medido em runtime.** Vale como aviso e como roteiro de medição (T-030), não
+como prova. O que o binário diz e o que o harness faz já divergiram nesta feature.
+
+Origem: `bin/claude.exe` (209 MB, bun compilado), varredura por contexto ASCII ao redor de
+`UserPromptSubmit`.
+
+### 1. O evento dispara para seis origens diferentes, e nem todas são fim de turno
+
+O payload tem um campo `source`, com esta descrição literal:
+
+> `user` = submitted from the interactive composer · `sdk` = non-interactive entrypoint (`-p` / Agent
+> SDK) · `loop_wakeup` = dynamic /loop wakeup · `schedule_wakeup` = scheduled-task fire
+> (CronCreate/routine) · `system` = other machine-injected turns (**peer/channel messages**, task
+> notifications, auto-continuation) · `poll_event` = the poll-event channel enqueue-time pass (**the
+> hook fires when the host submits an event, before its delivery ack exists**)
+>
+> *"Payloads may omit it while the field rolls out."*
+
+Duas dessas origens derrubam a premissa "UserPromptSubmit = o turno anterior acabou":
+
+- **`poll_event` dispara no ENQUEUE**, dito com todas as letras — ou seja, com um turno possivelmente
+  em andamento;
+- **`system` inclui mensagem de peer** (`SendMessage`, que esta feature usa como canal!) e
+  notificação de tarefa. Se uma peer me escrever no meio do meu turno e isso gerar um
+  `UserPromptSubmit`, um release ali cai **dentro de um turno vivo** — que é exatamente o erro das
+  três tentativas de 17/09, com outra roupa.
+
+Consequência para o desenho: liberar só com `source == "user"`. O erro é assimétrico — não liberar num
+wakeup legítimo custa esperar o próximo prompt (status quo); liberar no meio de um turno vivo destrói
+faixa de quem está escrevendo. **Mas o campo é opcional e está em rollout**: se este build não o
+enviar no composer interativo, a regra torna o hook inerte. É a primeira coisa que a T-030 mede.
+
+### 2. O evento PODE disparar dentro de subagente
+
+Existem dois produtores. Um ignora agente; o outro resolve o alvo como `r.agentId ?? r.session.id` e
+monta o payload com `agent_id` preenchido (o payload base dos hooks inclui `session_id`,
+`transcript_path`, `cwd`, `scratchpad_dir`, `prompt_id`, `permission_mode`, `agent_id`, `agent_type`,
+`effort`). Como o `session_id` dentro de subagente é o da sessão **pai** (já medido nesta feature), um
+release que casasse só por `session_id` mataria os claims do main a partir do subagente.
+
+A decisão de 17/09 (`agente_exato=True`, poupar subagente) já cobre isso — mas por sorte, não por
+projeto. Agora está escrito.
+
+### 3. Stdout não vazio com exit 0 vira `additionalContext` automaticamente
+
+Literal do binário: com `status === 0`, se a saída aparada não for vazia, o harness monta
+`{hookSpecificOutput: {hookEventName, additionalContext: <stdout>}}` sozinho — só para
+`UserPromptSubmit` e `UserPromptExpansion`.
+
+Ou seja: **qualquer coisa que o hook imprima é injetada no contexto do modelo a cada prompt.** Um
+`print()` de depuração esquecido vira token gasto em toda mensagem do usuário. O hook tem de sair com
+stdout **absolutamente vazio** (AC-026).
+
+E `status === 2` **bloqueia o prompt** (mensagem: *"Prompt blocked: the UserPromptSubmit hooks did not
+run over the submitted text"*). A regra dos entrypoints — sair sempre com 0 — vale aqui em dobro.
+
+### 4. Timeout default é 30 s
+
+Mapa de timeouts do binário: `PreToolUse: 15`, `UserPromptSubmit: 30`, `Stop: 120`. Os hooks do
+cc-coord declaram `timeout: 10` explicitamente, o que continua valendo.
+
+---
+
 ## 6. O que esta medição **não** cobriu
 
 - `FileChanged` com **muitos** paths vigiados (custo do watcher com ~100 arquivos) — medir na Task de performance.
