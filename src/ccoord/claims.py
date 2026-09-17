@@ -254,10 +254,19 @@ class Claim:
         acquired_at: int,
         renewed_at: int,
         ttl_s: int,
+        ranges: "list[tuple[int, int]] | None" = None,
     ) -> None:
         self.resource = resource
         self.path = path
         self.range = range
+        # T-026/AC-023: TODAS as faixas que este dono tocou no turno. `range`
+        # segue sendo a mais recente (compatibilidade com quem ja lia o
+        # campo); `ranges` e a lista que a decisao consulta. Lista VAZIA com
+        # `range is None` = arquivo inteiro, e nesse caso colide com tudo.
+        if ranges is not None:
+            self.ranges = [tuple(f) for f in ranges if f]
+        else:
+            self.ranges = [tuple(range)] if range else []
         self.owner = owner
         self.scope = scope
         self.purpose = purpose
@@ -270,6 +279,7 @@ class Claim:
             "resource": self.resource,
             "path": self.path,
             "range": list(self.range) if self.range else None,
+            "ranges": [list(f) for f in self.ranges],
             "owner": self.owner.to_dict(),
             "scope": self.scope,
             "purpose": self.purpose,
@@ -286,10 +296,31 @@ class Claim:
             # AttributeError cru antes desta checagem.
             raise TypeError(f"claim deve ser dict, recebi {type(d).__name__}")
         faixa = d.get("range")
+        # `ranges` ausente = claim gravado pela versao anterior a T-026: a
+        # unica faixa conhecida e `range`, e o construtor deriva a lista dela.
+        faixas = d.get("ranges")
+        if faixas is not None and not isinstance(faixas, (list, tuple)):
+            faixas = None  # `"ranges": "xx"` atravessava tudo e so estourava na decisao
+        if faixas:
+            # Valida ARIDADE e TIPO aqui, no unico ponto por onde todo claim
+            # lido de disco passa. Sem isto, um par malformado so estourava la
+            # na frente (`IndexError`/`TypeError` medidos em `policy.decide`),
+            # o `hookio` engolia a excecao e o aviso da peer sumia em silencio
+            # -- achado da auditoria adversarial de 17/09.
+            limpas = []
+            for f in faixas:
+                if not isinstance(f, (list, tuple)) or len(f) != 2:
+                    continue
+                try:
+                    limpas.append((int(f[0]), int(f[1])))
+                except (TypeError, ValueError):
+                    continue
+            faixas = limpas
         return cls(
             resource=d["resource"],
             path=str(d.get("path", d["resource"])),
             range=tuple(faixa) if faixa else None,
+            ranges=[tuple(f) for f in faixas if f] if faixas else None,
             owner=Owner.from_dict(d["owner"]),
             scope=str(d.get("scope", "turn")),
             purpose=str(d.get("purpose", "")),
@@ -548,6 +579,7 @@ def claim(
             "resource": resource,
             "path": path,
             "range": list(faixa) if faixa else None,
+            "ranges": [list(faixa)] if faixa else [],
             "owner": owner.to_dict(),
             "scope": scope,
             "purpose": purpose,
@@ -593,13 +625,27 @@ def claim(
         if _same_owner_identity(existente.owner, owner, casar_agent=True) and not _is_expired(
             existente
         ):
-            renovado = _renovar(fpath, existente, ttl_s, purpose or existente.purpose)
+            renovado = _renovar(
+                fpath,
+                existente,
+                ttl_s,
+                purpose or existente.purpose,
+                faixa_nova=faixa,
+                faixa_informada=True,
+            )
             if renovado is not None:
                 _log_event(
                     "acquire",
                     resource=resource,
                     path=path,
                     range=payload["range"],
+                    # `ranges` = o que ficou EM DISCO depois da renovacao.
+                    # Antes da T-026 o log registrava a faixa pedida e o disco
+                    # guardava a primeira do turno, calados: foi essa
+                    # divergencia que escondeu o defeito da faixa congelada
+                    # durante a medicao de 17/09 (quem le o log tem de poder
+                    # confiar que ele descreve o estado, nao a intencao).
+                    ranges=[list(f) for f in renovado.ranges],
                     owner=owner.to_dict(),
                     scope=scope,
                     renewed=True,
@@ -640,18 +686,62 @@ def claim(
     return ClaimResult(False, existente, "contention_exhausted")
 
 
-def _renovar(fpath: str, existente: Claim, ttl_s: int, purpose: str) -> Claim | None:
+# Teto de faixas por claim: um turno que edita o mesmo arquivo dezenas de
+# vezes nao pode fazer o arquivo de claim crescer sem limite. Ao estourar, o
+# claim degrada para "arquivo inteiro" (`range=None`), que e conservador --
+# avisa demais, nunca de menos.
+_MAX_FAIXAS = 32
+
+
+def _acumular_faixas(anteriores: "list[tuple[int, int]]", nova) -> "tuple[list, tuple | None]":
+    """Junta a faixa nova as do turno. Devolve `(ranges, range_principal)`.
+
+    Regras (T-026/AC-023):
+      - faixa nova `None` (tipico de `Write`) zera tudo: o dono passa a valer
+        pelo arquivo inteiro, que e o que um `Write` de fato faz;
+      - dono que JA vale pelo arquivo inteiro nao volta atras ao receber uma
+        faixa (seria afrouxar uma protecao ja concedida);
+      - `range` principal passa a ser a faixa mais RECENTE, nao a primeira --
+        era daqui que vinha o silencio indevido medido em 17/09.
+    """
+    if nova is None:
+        return [], None
+    nova = tuple(nova)
+    if not anteriores:
+        # lista vazia com faixa nova: ou e claim novo, ou o dono ja valia pelo
+        # arquivo inteiro. Quem chama distingue passando `anteriores` = [].
+        return [nova], nova
+    faixas = list(anteriores)
+    if nova not in faixas:
+        faixas.append(nova)
+    if len(faixas) > _MAX_FAIXAS:
+        return [], None
+    return faixas, nova
+
+
+def _renovar(
+    fpath: str, existente: Claim, ttl_s: int, purpose: str, faixa_nova=None, faixa_informada=False
+) -> Claim | None:
     agora = _now_ms()
+    if faixa_informada:
+        if existente.range is None and not existente.ranges:
+            # ja vale pelo arquivo inteiro: nao estreita
+            faixas, principal = [], None
+        else:
+            faixas, principal = _acumular_faixas(existente.ranges, faixa_nova)
+    else:
+        faixas, principal = existente.ranges, existente.range
     atualizado = Claim(
         resource=existente.resource,
         path=existente.path,
-        range=existente.range,
+        range=principal,
         owner=existente.owner,
         scope=existente.scope,
         purpose=purpose,
         acquired_at=existente.acquired_at,
         renewed_at=agora,
         ttl_s=ttl_s,
+        ranges=faixas,
     )
     dados = json.dumps(atualizado.to_dict(), ensure_ascii=False).encode("utf-8")
     try:
@@ -721,7 +811,15 @@ def overlapping(
             continue
         if not _same_path(c.path, path):
             continue
-        if not _ranges_overlap(c.range, lines):
+        # T-026: compara contra TODAS as faixas do turno, nao so a ultima.
+        # `ranges` vazio = arquivo inteiro, que colide com tudo. Ler so
+        # `c.range` deixava esta consulta (usada por `ccoord who` e pelo mapa
+        # de sessao) discordando da decisao que o `policy` toma -- dois
+        # oraculos para a mesma pergunta e a receita do defeito invisivel.
+        if c.ranges:
+            if not any(_ranges_overlap(f, lines) for f in c.ranges):
+                continue
+        elif not _ranges_overlap(c.range, lines):
             continue
         if esta_vivo is not None and _stealable(c, esta_vivo):
             continue
@@ -776,6 +874,96 @@ def release(owner: Owner, scope: str) -> int:
             scope=scope,
         )
     return removidos
+
+
+def encurtar_ttl_do_turno(owner: Owner, ttl_s: int = 90) -> int:
+    """Faz os claims de turno do `owner` expirarem em `ttl_s`. Devolve quantos.
+
+    Existe por causa de uma interacao entre duas correcoes de 17/09 que a
+    auditoria adversarial pegou (T-025 x T-026): o `Stop` passou a liberar os
+    claims de turno mesmo em REENTRADA, e reentrada nao significa fim de turno
+    -- significa que outro hook bloqueou e o modelo vai continuar. Apagar ali
+    jogava fora as faixas ja acumuladas no turno, e a peer que editasse
+    exatamente onde o dono tinha mexido ouvia "sem sobreposicao".
+
+    Encurtar o TTL resolve os dois lados sem precisar adivinhar o futuro:
+
+      - o turno CONTINUA -> a proxima edicao renova o claim, o TTL volta ao
+        normal e as faixas seguem inteiras;
+      - o turno ACABOU de verdade -> o claim morre em `ttl_s` em vez dos 900 s
+        do TTL normal, e `owner_of()` ja o ignora antes disso (expirado nao e
+        dono). Era esse o vazamento medido: 1.140 claims presos em 5 dias.
+
+    Nunca ALONGA um TTL: claim que ja ia expirar antes fica como esta.
+    """
+    if ttl_s <= 0:
+        raise ValueError("ttl_s deve ser positivo")
+
+    agora = _now_ms()
+    afetados = 0
+    for fpath in _iter_claim_files():
+        c = _read_claim_file(fpath)
+        if c is None:
+            continue
+        if c.scope != "turn" or not _same_owner_identity(c.owner, owner, casar_agent=True):
+            continue
+        # quanto ainda falta para expirar, no TTL atual
+        restante_ms = (c.renewed_at + c.ttl_s * 1000) - agora
+        if restante_ms <= ttl_s * 1000:
+            continue  # ja expira antes: nao mexe
+        novo = Claim(
+            resource=c.resource,
+            path=c.path,
+            range=c.range,
+            owner=c.owner,
+            scope=c.scope,
+            purpose=c.purpose,
+            acquired_at=c.acquired_at,
+            # recua `renewed_at` para que o TTL efetivo passe a ser `ttl_s`
+            # sem tocar no campo `ttl_s` gravado (que o claim() usa ao renovar)
+            renewed_at=agora - max(0, (c.ttl_s - ttl_s) * 1000),
+            ttl_s=c.ttl_s,
+            ranges=c.ranges,
+        )
+        # mesma reconferencia do release(): o snapshot pode estar obsoleto.
+        if not _sobrescrever_se_ainda_e_o_mesmo(fpath, c, novo):
+            continue
+        afetados += 1
+        _log_event(
+            "ttl_encurtado",
+            resource=c.resource,
+            path=c.path,
+            range=list(c.range) if c.range else None,
+            ranges=[list(f) for f in c.ranges],
+            owner=c.owner.to_dict(),
+            scope=c.scope,
+            expira_em_s=ttl_s,
+        )
+    return afetados
+
+
+def _sobrescrever_se_ainda_e_o_mesmo(fpath: str, esperado: Claim, novo: Claim) -> bool:
+    """Grava `novo` só se o arquivo ainda contém o claim `esperado`."""
+    atual = _read_claim_file(fpath)
+    if atual is None:
+        return False
+    if (
+        atual.owner.session_id != esperado.owner.session_id
+        or atual.owner.pid != esperado.owner.pid
+        or atual.owner.proc_start != esperado.owner.proc_start
+        or atual.acquired_at != esperado.acquired_at
+    ):
+        return False
+    dados = json.dumps(novo.to_dict(), ensure_ascii=False).encode("utf-8")
+    try:
+        fd = os.open(fpath, os.O_WRONLY | os.O_TRUNC)
+    except OSError:
+        return False
+    try:
+        os.write(fd, dados)
+    finally:
+        os.close(fd)
+    return True
 
 
 def release_resource(resource: str, owner: Owner) -> bool:

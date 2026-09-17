@@ -106,12 +106,39 @@ def main() -> int:
 
         payload = hookio.ler_payload()
 
-        if not payload.get("stop_hook_active"):
-            try:
-                dono = hookio.identidade(payload)
+        # T-025/AC-021: fim de turno SEMPRE devolve os claims -- mas de dois
+        # jeitos diferentes, porque "Stop" nao quer dizer a mesma coisa nos
+        # dois casos.
+        #
+        # O defeito original: o release inteiro ficava sob
+        # `if not stop_hook_active`, e isso produziu 1.140 claims presos em 5
+        # dias (3.934 tomados contra 2.679 liberados, medido em 17/09). Todo
+        # Stop bloqueado por outro hook faz o turno continuar, e nesta maquina
+        # o Stop tem QUATRO hooks de terceiros registrados (verify_gate.py,
+        # delta_gate.py, obsidian_stop.py, hook.mjs) -- tres medidos
+        # bloqueando. Como o ULTIMO Stop de um turno que foi bloqueado alguma
+        # vez tambem chega com `stop_hook_active=True`, o turno inteiro
+        # terminava sem devolver nada.
+        #
+        # Mas liberar em reentrada tambem estava errado, e a auditoria
+        # adversarial de 17/09 mediu o preco: reentrada NAO e fim de turno, e
+        # apagar ali joga fora as faixas ja acumuladas (T-026) -- a peer que
+        # editasse exatamente onde eu tinha mexido passava a ouvir "sem
+        # sobreposicao". Dai a assimetria abaixo: em reentrada o claim so
+        # passa a expirar rapido (a proxima edicao renova e preserva tudo);
+        # o release de verdade fica no Stop que nao e reentrada.
+        try:
+            dono = hookio.identidade(payload)
+            if payload.get("stop_hook_active"):
+                claims.encurtar_ttl_do_turno(dono, ttl_s=90)
+            else:
                 claims.release(dono, scope="turn")
-            except Exception:
-                pass  # release() ja e defensivo; guarda extra, nunca propaga
+        except Exception:
+            pass  # ambos ja sao defensivos; guarda extra, nunca propaga
+
+        if not payload.get("stop_hook_active"):
+            # Limpeza de manutencao (nao e liberacao de recurso): so uma vez
+            # por turno basta, e nada fica preso se ela esperar.
             try:
                 _varrer_own_writes_expirados(_ccoord_home())
             except Exception:

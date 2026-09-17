@@ -1,5 +1,12 @@
 # Como retomar a feature cc-coord
 
+> **Atualização 17/09/2026 — a feature está INSTALADA e em uso desde 12/09.** O corpo deste arquivo
+> abaixo é de 11/09 e descreve a fase anterior (código pronto, nada instalado); vale como histórico.
+> O estado de hoje: T-001 a T-026 concluídas, 322 testes, `onp-spec verify` 23/23 com prova PASS,
+> `audit --ci` sem erro. **Leia `medicao-uso-producao.md` antes de mexer**: os quatro últimos
+> defeitos corrigidos vieram do log de uso real, não de teste nem de auditoria — inclusive um gate
+> cego em caminho com espaço e 1.140 claims de turno que nunca eram liberados.
+
 Atualizado em 2026-09-11, fim do dia. Abrir a sessão dentro do repo:
 
 ```

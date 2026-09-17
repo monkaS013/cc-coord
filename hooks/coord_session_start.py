@@ -204,9 +204,23 @@ def _entrypoints_desatualizados() -> list:
 def main() -> int:
     try:
         _bootstrap_src_path()
-        from ccoord import hookio, sessions
+        from ccoord import hookio, sessions, claims
 
         payload = hookio.ler_payload()
+
+        # T-025/AC-022: varrer claim orfao ANTES de montar o mapa. Sem isto o
+        # que ja vazou so saia pelo TTL de quem o tomou -- medido em 17/09:
+        # 51 dos 76 claims em disco tinham mais de 24 h, e o mapa do
+        # SessionStart mostrava todos como recurso ocupado, ensinando a nova
+        # sessao a respeitar dono que nao existe mais. `sweep()` so remove
+        # claim EXPIRADO ou de processo morto (`_stealable`), entao claim de
+        # peer viva nao e tocado; cada remocao ja vira `steal_stale` no log.
+        # Inicio de sessao esta fora do caminho quente do RNF-04.
+        try:
+            claims.sweep()
+        except Exception:
+            pass  # limpeza best-effort; nunca pode atrapalhar o mapa
+
         decisor = _construir_decisor(sessions)
         hookio.executar(payload, decisor)
     except Exception:
