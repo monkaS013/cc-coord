@@ -827,7 +827,7 @@ def overlapping(
     return achados
 
 
-def release(owner: Owner, scope: str) -> int:
+def release(owner: Owner, scope: str, *, agente_exato: bool = False) -> int:
     """Libera claims do `owner` conforme `scope` e devolve quantos saíram.
 
     - ``"turn"``: só claims com `claim.scope == "turn"` do mesmo dono (casando
@@ -838,6 +838,19 @@ def release(owner: Owner, scope: str) -> int:
       `agent_id` - varredura total, uso típico em `SessionEnd` (AC-008): "não
       sobra lease nenhuma daquela sessão" vale para qualquer agente/subagente
       que a tenha criado.
+
+    `agente_exato` (só afeta `scope="turn"`, default `False` para que `Stop` e
+    `SessionEnd` fiquem byte a byte como estão): exige `agent_id` IGUAL, em vez
+    de aceitar o casamento largo de `_same_owner_identity`, que casa só por
+    `session_id` quando o `agent_id` de quem pede é nulo. Sem isto, um release
+    pedido pelo main apaga TAMBÉM os claims dos subagentes - 41,8% das
+    aquisições de turno medidas em 5 dias. No `Stop` isso é inofensivo (o turno
+    acabou para todos); no início do turno seguinte (T-032) pode alcançar um
+    subagente de background ainda vivo, e tirar a faixa de quem está escrevendo
+    é SILÊNCIO INDEVIDO - o pior modo de falha desta feature. Segunda razão,
+    independente: o `UserPromptSubmit` pode disparar dentro de subagente (lido
+    no binário 2.1.261), e lá o `session_id` é o do PAI - casar só por sessão
+    deixaria um subagente liberar os claims do main.
     """
     if scope not in ("turn", "session", "all"):
         raise ValueError(f"scope invalido: {scope!r}")
@@ -850,6 +863,8 @@ def release(owner: Owner, scope: str) -> int:
 
         if scope == "turn":
             bate = c.scope == "turn" and _same_owner_identity(c.owner, owner, casar_agent=True)
+            if bate and agente_exato:
+                bate = c.owner.agent_id == owner.agent_id
         elif scope == "session":
             bate = _same_owner_identity(c.owner, owner, casar_agent=True)
         else:  # "all"

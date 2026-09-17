@@ -185,6 +185,34 @@ existe, liberado quando o turno acaba, e com a faixa onde o dono está agora.
 - **E** a peer que edita a linha 82 recebe aviso de sobreposição, enquanto quem edita a linha 500 recebe só ciência
 - **E** claim sem faixa (`Write`, arquivo inteiro) continua colidindo com qualquer edição
 
+#### AC-024 — Claim de turno não sobrevive ao prompt seguinte
+
+- **Dado** um claim de escopo `turn` desta sessão, tomado no turno anterior e ainda dentro do TTL
+- **Quando** o usuário envia o próximo prompt
+- **Então** esse claim é liberado antes de o turno novo começar
+- **E** a peer que editar aquela faixa em seguida não recebe aviso de sobreposição
+
+#### AC-025 — O release do início do turno não alcança quem não é meu
+
+- **Dado** claims de escopo `turn` de um subagente desta sessão, de outra sessão, e um claim de escopo `session` (perfil de browser) desta mesma sessão
+- **Quando** o hook de início de turno roda
+- **Então** nenhum dos três é removido
+- **E** o claim de turno do main desta sessão é removido na mesma passada
+
+#### AC-027 — Prompt que não veio do usuário não encerra turno nenhum
+
+- **Dado** um `UserPromptSubmit` cuja origem não é o composer do usuário (`poll_event`, que dispara no enqueue, ou `system`, que inclui mensagem de peer e notificação de tarefa)
+- **Quando** o hook de início de turno roda
+- **Então** nenhum claim é liberado, porque o turno anterior pode estar em andamento
+- **E** com origem do composer do usuário o release acontece normalmente
+
+#### AC-026 — O hook de início de turno nunca bloqueia nem fala
+
+- **Dado** um payload vazio, lixo que não é JSON, sem `session_id`, ou uma raiz de estado ilegível
+- **Quando** o hook de início de turno roda
+- **Então** ele termina com exit 0, stdout vazio, e o prompt do usuário segue
+- **E** com dono indeterminável (`session_id` vazio) nenhum claim é removido
+
 ## Fora de escopo
 
 - Resolver o merge de trabalho concorrente: a feature evita a colisão, integrar continua sendo decisão do Vinicius.
@@ -201,8 +229,14 @@ existe, liberado quando o turno acaba, e com a faixa onde o dono está agora.
 - **ASM-005** Resolvida em 04/09: o wrapper no perfil do PowerShell nomeia as sessões automaticamente.
 - **ASM-006** O aviso só alcança a sessão nos instantes em que um hook dispara — não existe canal contínuo. O protocolo precisa caber nessas janelas.
 
+- **ASM-007 (BLOQUEANTE)** `UserPromptSubmit` dispara quando o prompt é submetido ao modelo, não quando o usuário aperta Enter com um turno ainda em andamento. Se disparar no Enter, o release cai no meio de um turno vivo — o mesmo erro das três tentativas de 17/09. Medir com `tools/probe/` antes de escrever o hook; não deduzir do nome do evento.
+- **ASM-008** `UserPromptSubmit` não dispara dentro de subagente. Se disparar, o `agent_id` do payload precisa entrar na identidade, senão um subagente libera o claim do main.
+- **ASM-009** Sem `session_id` no payload nem em `CLAUDE_CODE_SESSION_ID`, o dono sai vazio — e dono vazio casaria com claim de dono vazio de qualquer sessão. Nesse caso o hook não libera nada (AC-026).
+
 ## Perguntas em aberto
 
+- **Q-007** O `Stop` libera tudo (inclusive subagente) e o `UserPromptSubmit` poupa subagente. A assimetria é deliberada, mas deixa o claim de subagente para o TTL quando o `Stop` nunca roda limpo. Medir no regime novo; se for material, vira spec junto da pendência 3.
+- **Q-008** O hook novo entra no `settings.json` global, que afeta todas as sessões abertas: instalar exige OK do Vinicius e aviso às peers, mesma fronteira da T-012.
 - **Q-003** `crossSessionInbound` fica em `accept` global? Sob `bypassPermissions` o padrão é `hold`, e a mensagem entre sessões pode ficar presa esperando clique. Verificar depois da instalação.
 - **Q-005** Derivar a faixa de linhas do trecho editado custa uma leitura de arquivo no caminho quente. Se o custo passar de 150 ms, a claim cai para o arquivo inteiro.
 - **Q-006** Quantos caminhos vigiados o sensor aguenta antes de pesar? Medir com 10 e 100.

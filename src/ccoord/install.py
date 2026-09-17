@@ -14,7 +14,7 @@ O que este modulo faz (`instalar()`):
       `context_alert.py`, `memory_recall_start.py`, `obsidian_stop.py`,
       `pre_push_migration_gate.py`, `block_env_edit.py` -- todos continuam
       rodando depois);
-  (c) copia os 7 entrypoints de `<src_repo>/hooks/` para `<destino_config>/hooks/`;
+  (c) copia os 9 entrypoints de `<src_repo>/hooks/` para `<destino_config>/hooks/`;
   (d) copia `<src_repo>/rules/coordenacao-sessoes.md` para
       `<destino_config>/rules/`;
   (e) registra/atualiza `env.CCOORD_SRC` em `settings.json` apontando para
@@ -130,6 +130,19 @@ HOOKS_SPECS: tuple[dict, ...] = (
         "script": "coord_file_changed.py",
         "timeout": 10,
         "status_message": "Coordenacao entre sessoes: sensor de alteracao externa",
+    },
+    {
+        # T-032: o `Stop` so libera claims de turno quando NAO e reentrada, e
+        # com quatro hooks de terceiros no `Stop` desta maquina a reentrada e
+        # rotina -- 20,1% dos claims de turno atravessavam o fim do turno
+        # (medido em 5 dias). O prompt seguinte e o unico sinal confiavel de
+        # que o turno anterior morreu. Sai calado: neste evento qualquer stdout
+        # nao vazio vira `additionalContext` automatico.
+        "event": "UserPromptSubmit",
+        "matcher": "",
+        "script": "coord_user_prompt.py",
+        "timeout": 10,
+        "status_message": "Coordenacao entre sessoes: fechando o turno anterior",
     },
     {
         "event": "Stop",
@@ -818,7 +831,7 @@ def instalar(
 
 def desinstalar(destino_config: str | Path, *, _agora: datetime.datetime | None = None) -> Relatorio:
     """Remove SOMENTE o que `instalar()` acrescentou: as 7 entradas de hook
-    (por matcher/comando), o valor de `env.CCOORD_SRC`, os 7 entrypoints
+    (por matcher/comando), o valor de `env.CCOORD_SRC`, os 9 entrypoints
     copiados e a regra copiada. Qualquer hook/entrada alheia no mesmo evento
     ou matcher permanece intacta."""
     destino_config = str(destino_config)
