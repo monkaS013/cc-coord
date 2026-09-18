@@ -46,7 +46,7 @@ def slug_path(path: str) -> str:
 
     Passa pela MESMA resolucao de nome curto 8.3 que `classify` usa para montar
     o id do claim (`ccoord.paths`). Sem isso, `VINICI~1\\x.py` e
-    `ViniciusMoraisHDT\\x.py` -- o MESMO arquivo -- geram carimbos diferentes,
+    `usuario\\x.py` -- o MESMO arquivo -- geram carimbos diferentes,
     o eco da escrita propria nunca casa, e a sessao recebe aviso falso de
     mudanca externa sobre a propria escrita.
     """

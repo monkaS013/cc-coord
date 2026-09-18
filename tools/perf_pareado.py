@@ -17,9 +17,9 @@ import sys
 import tempfile
 import time
 
-WT = r"C:\Users\ViniciusMoraisHDT\dev\cc-coord"
+WT = r"C:\Users\usuario\dev\cc-coord"
 HEAD = (
-    r"C:\Users\VINICI~1\AppData\Local\Temp\claude\C--Users-ViniciusMoraisHDT"
+    r"C:\Users\VINICI~1\AppData\Local\Temp\claude\C--Users-usuario"
     r"\731da193-440e-4745-b605-5f08d48c9be4\scratchpad\cc_coord_head"
 )
 PYTHON = r"C:\Python314\python.exe"

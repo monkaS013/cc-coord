@@ -13,7 +13,7 @@
 #
 # O capture.py ja nomeia o arquivo com sufixo quando o payload tem `agent_id`.
 set -u
-BASE="C:/Users/ViniciusMoraisHDT/dev/cc-coord/tools/probe"
+BASE="C:/Users/usuario/dev/cc-coord/tools/probe"
 cd "$BASE" || exit 1
 
 rm -rf captures6 && mkdir -p captures6

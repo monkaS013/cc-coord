@@ -33,10 +33,10 @@ if SRC not in sys.path:
 from ccoord import classify  # noqa: E402
 
 RAIZES_PADRAO = [
-    r"C:\Oscar Alho",
+    r"C:\Meu Vault",
     os.path.expanduser(r"~\dev"),
     os.path.expanduser(r"~\.claude"),
-    os.path.expanduser(r"~\OneDrive - HDT ENERGY"),
+    os.path.expanduser(r"~\OneDrive - Empresa"),
 ]
 IGNORAR = {".git", "node_modules", "__pycache__", ".venv", ".pytest_cache"}
 

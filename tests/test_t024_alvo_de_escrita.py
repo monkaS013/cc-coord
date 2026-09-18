@@ -20,7 +20,7 @@ Dois defeitos distintos, um teste para cada:
   (`...\arquivo`, `...\com`, `...\espaco.md`) e **nenhum do arquivo de
   verdade** — gate cego, nao ruidoso, em toda a familia de caminhos com
   espaco que e a regra nesta maquina ("Area de Trabalho", "Program Files",
-  "OneDrive - HDT ENERGY").
+  "OneDrive - Empresa").
 
 Nao-vacuidade: cada bloco tem controle negativo com caminhos legitimos que
 PRECISAM continuar virando claim. Um filtro que rejeita demais troca ruido
@@ -159,7 +159,7 @@ class TestFragmentoDeComandoNaoViraClaim(unittest.TestCase):
             # filtro cegava todos eles, e o vault é o alvo de escrita mais
             # frequente desta máquina.
             (
-                'echo x > "C:/Oscar Alho/Carreira/Plano - portfolio GitHub '
+                'echo x > "C:/Meu Vault/Carreira/Plano - portfolio GitHub '
                 '(plano completo, 2026-08-25).md"',
                 "(plano completo, 2026-08-25).md",
             ),
@@ -233,24 +233,24 @@ class TestAlvoEntreAspasComEspaco(unittest.TestCase):
 
     def test_tee_com_caminho_entre_aspas(self):
         "@spec:AC-020 `tee` com caminho com espaco tambem vem inteiro"
-        alvos = _arquivos('echo x | tee "C:/Oscar Alho/Daily/2026-09-17 (copia).md"')
+        alvos = _arquivos('echo x | tee "C:/Meu Vault/Daily/2026-09-17 (copia).md"')
         self.assertEqual(len(alvos), 1, f"esperava 1 alvo, veio {alvos!r}")
         self.assertTrue(alvos[0].endswith("2026-09-17 (copia).md"), alvos[0])
 
     def test_copia_com_destino_entre_aspas(self):
         "@spec:AC-020 destino de `cp` com espaco vira o claim do arquivo certo"
-        alvos = _arquivos('cp origem.md "C:/Oscar Alho/Daily/2026-09-17.md"')
+        alvos = _arquivos('cp origem.md "C:/Meu Vault/Daily/2026-09-17.md"')
         self.assertEqual(len(alvos), 1, f"esperava 1 alvo, veio {alvos!r}")
         self.assertTrue(alvos[0].endswith(os.path.join("Daily", "2026-09-17.md")), alvos[0])
 
     def test_powershell_set_content_com_espaco(self):
         "@spec:AC-020 `-Path \"...com espaco...\"` do PowerShell tambem vem inteiro"
         alvos = _arquivos(
-            'Set-Content -Path "C:/Users/Vinicius/OneDrive - HDT ENERGY/x.txt" -Value 1'
+            'Set-Content -Path "C:/Users/Vinicius/OneDrive - Empresa/x.txt" -Value 1'
         )
         self.assertEqual(len(alvos), 1, f"esperava 1 alvo, veio {alvos!r}")
         self.assertTrue(
-            alvos[0].endswith(os.path.join("OneDrive - HDT ENERGY", "x.txt")),
+            alvos[0].endswith(os.path.join("OneDrive - Empresa", "x.txt")),
             f"o alvo nao e o arquivo real: {alvos[0]!r}",
         )
 

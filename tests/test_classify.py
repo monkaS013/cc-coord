@@ -35,9 +35,9 @@ class TestClassify(unittest.TestCase):
     # ------------------------------------------------------------------
     def test_worktree_nao_confundido_com_checkout_primario(self):
         "@spec:AC-004 worktree nao e confundido com o checkout primario"
-        cwd_checkout_primario = r"C:\Users\ViniciusMoraisHDT\dev\workday-hdt-ts"
+        cwd_checkout_primario = r"C:\Users\usuario\dev\app-exemplo"
         file_path_worktree = (
-            r"C:\Users\ViniciusMoraisHDT\dev\workday-hdt-ts"
+            r"C:\Users\usuario\dev\app-exemplo"
             r"\.claude\worktrees\feature-x\src\app.ts"
         )
 
@@ -66,9 +66,9 @@ class TestClassify(unittest.TestCase):
 
     def test_edit_tambem_chaveia_no_file_path_no_cwd(self):
         "@spec:AC-004 Edit dentro de worktree tambem chaveia no file_path"
-        cwd_checkout_primario = r"C:\Users\ViniciusMoraisHDT\dev\workday-hdt-ts"
+        cwd_checkout_primario = r"C:\Users\usuario\dev\app-exemplo"
         file_path_worktree = (
-            r"C:\Users\ViniciusMoraisHDT\dev\workday-hdt-ts"
+            r"C:\Users\usuario\dev\app-exemplo"
             r"\.claude\worktrees\feature-x\src\app.ts"
         )
         recursos = classify(
@@ -91,7 +91,7 @@ class TestClassify(unittest.TestCase):
         recursos = classify(
             "Bash",
             {"command": "Stop-Process -Name chrome -Force"},
-            r"C:\Users\ViniciusMoraisHDT\dev\algum-projeto",
+            r"C:\Users\usuario\dev\algum-projeto",
         )
         self.assertEqual(len(recursos), 1)
         recurso = recursos[0]
@@ -131,7 +131,7 @@ class TestClassify(unittest.TestCase):
         recursos = classify(
             "Bash",
             {"command": "uvicorn app:app --host 0.0.0.0 --port 8099"},
-            r"C:\Users\ViniciusMoraisHDT\dev\dashboard-im",
+            r"C:\Users\usuario\dev\dashboard-im",
         )
         portas = [r for r in recursos if r.kind == "port"]
         self.assertEqual(len(portas), 1)
@@ -150,7 +150,7 @@ class TestClassify(unittest.TestCase):
     # ------------------------------------------------------------------
     def test_git_commit_e_push_reconhecidos_mesmo_repo(self):
         "@spec:AC-007 git commit e git push sao reconhecidos com o repo identificado"
-        cwd = r"C:\Users\ViniciusMoraisHDT\dev\workday-hdt-ts"
+        cwd = r"C:\Users\usuario\dev\app-exemplo"
         recursos = classify(
             "Bash",
             {"command": 'git commit -m "wip" && git push origin main'},
@@ -231,7 +231,7 @@ class TestClassify(unittest.TestCase):
     def test_cd_encadeado_tambem_vale_pra_bind_e_migracao(self):
         "@spec:AC-006 cd encadeado tambem corrige o repo usado por bind/migracao"
         cwd_original = r"C:\dev\repo-errado"
-        repo_real = r"C:\dev\workday-hdt-ts"
+        repo_real = r"C:\dev\app-exemplo"
         r = classify(
             "Bash",
             {"command": f"cd {repo_real} && npx prisma migrate dev"},
@@ -239,11 +239,11 @@ class TestClassify(unittest.TestCase):
         )
         db = [x for x in r if x.kind == "db"]
         self.assertEqual(len(db), 1)
-        self.assertIn("workday-hdt-ts", db[0].id)
+        self.assertIn("app-exemplo", db[0].id)
 
     def test_migracao_de_schema_prisma_e_alembic(self):
         "@spec:AC-007 migracao de schema (prisma migrate / alembic) e reconhecida"
-        cwd = r"C:\Users\ViniciusMoraisHDT\dev\workday-hdt-ts"
+        cwd = r"C:\Users\usuario\dev\app-exemplo"
         r1 = classify("Bash", {"command": "npx prisma migrate dev"}, cwd)
         r2 = classify("Bash", {"command": "alembic upgrade head"}, cwd)
         self.assertTrue(any(r.kind == "db" and r.action == "migrate" for r in r1))
@@ -325,12 +325,12 @@ class TestClassify(unittest.TestCase):
         "@spec:AC-Norm mesmo arquivo escrito de duas formas gera o mesmo id"
         r1 = classify(
             "Write",
-            {"file_path": r"C:\Users\ViniciusMoraisHDT\dev\App\Index.JS", "content": "a"},
+            {"file_path": r"C:\Users\usuario\dev\App\Index.JS", "content": "a"},
             r"C:\dev\x",
         )
         r2 = classify(
             "Write",
-            {"file_path": "c:/users/viniciusmoraishdt/dev/app/index.js", "content": "b"},
+            {"file_path": "c:/users/usuario/dev/app/index.js", "content": "b"},
             r"C:\dev\x",
         )
         self.assertEqual(r1[0].id, r2[0].id)
@@ -709,7 +709,7 @@ class TestNomeCurto8_3(unittest.TestCase):
     """Gate CEGO medido no ensaio com duas sessoes reais (12/09).
 
     Uma sessao segurava `...\\VINICI~1\\...\\compartilhado.py` e a outra editava
-    `...\\ViniciusMoraisHDT\\...\\compartilhado.py`. `os.path.samefile` = True,
+    `...\\usuario\\...\\compartilhado.py`. `os.path.samefile` = True,
     ids diferentes, nenhuma via a outra. O diretorio de scratchpad entregue a
     cada sessao vem no formato 8.3, entao isto valeria para quase toda sessao.
     """

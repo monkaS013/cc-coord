@@ -247,8 +247,8 @@ class TestPolicyPorta(unittest.TestCase):
 class TestPolicyGit(unittest.TestCase):
     def test_commit_recusado_citando_commit_alheio(self):
         "@spec:AC-007 commit nao sai com trabalho alheio no meio"
-        repo = r"C:\dev\workday-hdt-ts"
-        recurso = Resource(kind="git", id="git:c--dev-workday-hdt-ts", path=repo, action="commit")
+        repo = r"C:\dev\app-exemplo"
+        recurso = Resource(kind="git", id="git:c--dev-app-exemplo", path=repo, action="commit")
         peers = [_sessao("sessao-peer", cwd=repo, name="peer-git")]
         me = _sessao("sessao-eu", cwd=repo)
 
@@ -267,8 +267,8 @@ class TestPolicyGit(unittest.TestCase):
 
     def test_push_recusado_mesmo_sem_lista_de_commits(self):
         "push tambem e recusado quando ha peer viva no mesmo repo, mesmo sem detalhe de commit"
-        repo = r"C:\dev\workday-hdt-ts"
-        recurso = Resource(kind="git", id="git:c--dev-workday-hdt-ts", path=repo, action="push")
+        repo = r"C:\dev\app-exemplo"
+        recurso = Resource(kind="git", id="git:c--dev-app-exemplo", path=repo, action="push")
         peers = [_sessao("sessao-peer", cwd=repo, name="peer-git")]
 
         d = policy.decide(recurso, None, _sessao("sessao-eu", cwd=repo), peers)
@@ -277,8 +277,8 @@ class TestPolicyGit(unittest.TestCase):
 
     def test_commit_sem_peer_no_repo_e_liberado(self):
         "sem peer viva no mesmo repo, commit segue liberado"
-        repo = r"C:\dev\workday-hdt-ts"
-        recurso = Resource(kind="git", id="git:c--dev-workday-hdt-ts", path=repo, action="commit")
+        repo = r"C:\dev\app-exemplo"
+        recurso = Resource(kind="git", id="git:c--dev-app-exemplo", path=repo, action="commit")
         peers = [_sessao("sessao-peer", cwd=r"C:\dev\outro-repo", name="peer-git")]
 
         d = policy.decide(recurso, None, _sessao("sessao-eu", cwd=repo), peers)
@@ -289,9 +289,9 @@ class TestPolicyGit(unittest.TestCase):
 class TestPolicyMigracao(unittest.TestCase):
     def test_migracao_com_peer_viva_gera_warn_forte(self):
         "migracao de schema com peer viva no repo: warn forte, adiar"
-        recurso = Resource(kind="db", id="db:workday-hdt-ts:migrations", action="migrate")
-        peers = [_sessao("sessao-peer", cwd=r"C:\dev\workday-hdt-ts", name="peer-db")]
-        me = _sessao("sessao-eu", cwd=r"C:\dev\workday-hdt-ts")
+        recurso = Resource(kind="db", id="db:app-exemplo:migrations", action="migrate")
+        peers = [_sessao("sessao-peer", cwd=r"C:\dev\app-exemplo", name="peer-db")]
+        me = _sessao("sessao-eu", cwd=r"C:\dev\app-exemplo")
 
         d = policy.decide(recurso, None, me, peers)
 
@@ -331,8 +331,8 @@ class TestPolicyCamposDeSessaoMalformados(unittest.TestCase):
 
     def test_peer_isolada_com_cwd_tipo_errado_nao_lanca_excecao(self):
         "cwd int/lista/dict/bool isolado: decide() nunca lanca, e cai em allow (sem info suficiente p/ provar mesmo repo)"
-        repo = r"C:\dev\workday-hdt-ts"
-        recurso = Resource(kind="git", id="git:c--dev-workday-hdt-ts", path=repo, action="commit")
+        repo = r"C:\dev\app-exemplo"
+        recurso = Resource(kind="git", id="git:c--dev-app-exemplo", path=repo, action="commit")
         me = _sessao("sessao-eu", cwd=repo)
 
         for cwd_malformado in (12345, [repo], {"x": 1}, True, 3.14):
@@ -343,8 +343,8 @@ class TestPolicyCamposDeSessaoMalformados(unittest.TestCase):
 
     def test_peer_malformada_nao_derruba_deny_de_peer_valida_no_mesmo_repo(self):
         "uma peer com cwd de tipo errado na lista nao pode fazer a checagem abortar para as demais peers (validas)"
-        repo = r"C:\dev\workday-hdt-ts"
-        recurso = Resource(kind="git", id="git:c--dev-workday-hdt-ts", path=repo, action="commit")
+        repo = r"C:\dev\app-exemplo"
+        recurso = Resource(kind="git", id="git:c--dev-app-exemplo", path=repo, action="commit")
         me = _sessao("sessao-eu", cwd=repo)
         peer_valida = _sessao("sessao-peer-valida", cwd=repo, name="peer-valida")
         peer_malformada = Session(pid=225, session_id="sessao-peer-malformada", cwd=999, name="peer-ruim", status="busy")
@@ -356,8 +356,8 @@ class TestPolicyCamposDeSessaoMalformados(unittest.TestCase):
 
     def test_peer_com_name_tipo_errado_nao_lanca_e_preserva_deny(self):
         "name int/lista (em vez de str) nao pode quebrar o join/sorted dos nomes nem derrubar o deny"
-        repo = r"C:\dev\workday-hdt-ts"
-        recurso = Resource(kind="git", id="git:c--dev-workday-hdt-ts", path=repo, action="commit")
+        repo = r"C:\dev\app-exemplo"
+        recurso = Resource(kind="git", id="git:c--dev-app-exemplo", path=repo, action="commit")
         me = _sessao("sessao-eu", cwd=repo)
 
         for name_malformado in (12345, [1, 2]):
@@ -368,8 +368,8 @@ class TestPolicyCamposDeSessaoMalformados(unittest.TestCase):
 
     def test_cwd_tipo_errado_tambem_nao_quebra_verificacao_de_migracao(self):
         "_reponame_do_cwd reusa _norm() -- o mesmo defeito de cwd tambem alcancava o ramo de migracao"
-        recurso = Resource(kind="db", id="db:workday-hdt-ts:migrations", action="migrate")
-        me = _sessao("sessao-eu", cwd=r"C:\dev\workday-hdt-ts")
+        recurso = Resource(kind="db", id="db:app-exemplo:migrations", action="migrate")
+        me = _sessao("sessao-eu", cwd=r"C:\dev\app-exemplo")
         peer_malformada = Session(pid=227, session_id="sessao-peer-mig", cwd=[1, 2, 3], name="peer-mig", status="busy")
 
         d = policy.decide(recurso, None, me, [peer_malformada])  # nao pode lancar
@@ -380,8 +380,8 @@ class TestPolicyCamposDeSessaoMalformados(unittest.TestCase):
 class TestPolicyRazaoTruncada(unittest.TestCase):
     def test_razao_nunca_estoura_o_teto_do_harness(self):
         "razao sempre <= 2000 chars / 20 linhas, mesmo com contexto gigante"
-        repo = r"C:\dev\workday-hdt-ts"
-        recurso = Resource(kind="git", id="git:c--dev-workday-hdt-ts", path=repo, action="commit")
+        repo = r"C:\dev\app-exemplo"
+        recurso = Resource(kind="git", id="git:c--dev-app-exemplo", path=repo, action="commit")
         peers = [_sessao("sessao-peer", cwd=repo, name="peer-git")]
         commits_gigantes = [f"commit-{i} " + ("x" * 200) for i in range(50)]
 

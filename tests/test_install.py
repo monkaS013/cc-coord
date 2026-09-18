@@ -1,7 +1,7 @@
 """Testes de ccoord.install - instalador dos hooks (T-12), unittest stdlib.
 
 RESTRICAO CRITICA (ver prompt da task): nada aqui pode tocar em
-`C:/Users/ViniciusMoraisHDT/.claude/*` de verdade -- todo teste roda contra um
+`C:/Users/usuario/.claude/*` de verdade -- todo teste roda contra um
 `destino_config` em `tempfile`, nunca contra o `~/.claude` real. A fixture de
 `settings.json` abaixo REPRODUZ o formato do arquivo real (lido, so leitura,
 antes de escrever este teste) para provar que o merge preserva os hooks ja em
@@ -45,7 +45,7 @@ from ccoord import install  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Fixture do settings.json REAL (reproduzida a partir da leitura, so leitura,
-# de C:/Users/ViniciusMoraisHDT/.claude/settings.json em 11/09) -- inclui
+# de C:/Users/usuario/.claude/settings.json em 11/09) -- inclui
 # eventos com mais de um hook e PreToolUse com dois grupos de matcher.
 # ---------------------------------------------------------------------------
 
@@ -71,7 +71,7 @@ def _settings_real_fixture() -> dict:
                     "hooks": [
                         {
                             "type": "command",
-                            "command": 'python "C:/Users/ViniciusMoraisHDT/.claude/hooks/block_env_edit.py"',
+                            "command": 'python "C:/Users/usuario/.claude/hooks/block_env_edit.py"',
                             "shell": "bash",
                             "timeout": 10,
                         }
@@ -82,7 +82,7 @@ def _settings_real_fixture() -> dict:
                     "hooks": [
                         {
                             "type": "command",
-                            "command": 'python "C:/Users/ViniciusMoraisHDT/.claude/hooks/pre_push_migration_gate.py"',
+                            "command": 'python "C:/Users/usuario/.claude/hooks/pre_push_migration_gate.py"',
                             "shell": "bash",
                             "timeout": 20,
                             "statusMessage": "Gate de migration no push...",
@@ -96,7 +96,7 @@ def _settings_real_fixture() -> dict:
                     "hooks": [
                         {
                             "type": "command",
-                            "command": 'python "C:/Users/ViniciusMoraisHDT/.claude/hooks/context_alert.py"',
+                            "command": 'python "C:/Users/usuario/.claude/hooks/context_alert.py"',
                             "shell": "bash",
                             "timeout": 10,
                         }
@@ -109,19 +109,19 @@ def _settings_real_fixture() -> dict:
                     "hooks": [
                         {
                             "type": "command",
-                            "command": 'python "C:/Users/ViniciusMoraisHDT/.claude/hooks/verify_gate.py"',
+                            "command": 'python "C:/Users/usuario/.claude/hooks/verify_gate.py"',
                             "shell": "bash",
                             "timeout": 15,
                         },
                         {
                             "type": "command",
-                            "command": 'python "C:/Users/ViniciusMoraisHDT/.claude/hooks/obsidian_stop.py"',
+                            "command": 'python "C:/Users/usuario/.claude/hooks/obsidian_stop.py"',
                             "shell": "bash",
                             "timeout": 15,
                         },
                         {
                             "type": "command",
-                            "command": 'node "C:/Users/ViniciusMoraisHDT/.claude/skills/impeccable/scripts/hook.mjs"',
+                            "command": 'node "C:/Users/usuario/.claude/skills/impeccable/scripts/hook.mjs"',
                             "timeout": 30,
                         },
                     ],
@@ -133,7 +133,7 @@ def _settings_real_fixture() -> dict:
                     "hooks": [
                         {
                             "type": "command",
-                            "command": 'python "C:/Users/ViniciusMoraisHDT/.claude/hooks/memory_recall_start.py"',
+                            "command": 'python "C:/Users/usuario/.claude/hooks/memory_recall_start.py"',
                             "shell": "bash",
                             "timeout": 10,
                         },
@@ -146,7 +146,7 @@ def _settings_real_fixture() -> dict:
                     "hooks": [
                         {
                             "type": "command",
-                            "command": 'node "C:/Users/ViniciusMoraisHDT/.claude/skills/impeccable/scripts/hook.mjs"',
+                            "command": 'node "C:/Users/usuario/.claude/skills/impeccable/scripts/hook.mjs"',
                             "timeout": 10,
                         }
                     ],

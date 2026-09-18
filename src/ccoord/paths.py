@@ -2,7 +2,7 @@
 
 FONTE UNICA, pelo mesmo motivo de `ccoord.carimbos`: quem grava um claim e quem
 le um carimbo tem de derivar a MESMA chave do mesmo arquivo. Se `classify`
-resolvesse `VINICI~1` -> `ViniciusMoraisHDT` e `carimbos.slug_path` nao, o eco
+resolvesse `VINICI~1` -> `usuario` e `carimbos.slug_path` nao, o eco
 da escrita propria nunca casaria e a sessao receberia aviso falso de "mudou em
 disco por outro processo" -- o defeito da 4a auditoria, ressuscitado por outra
 via. (Foi exatamente o que aconteceu: 7 testes de entrypoint quebraram quando a
@@ -24,12 +24,12 @@ _CACHE_NOME_LONGO: dict = {}
 
 
 def resolver_nome_curto(path: str) -> str:
-    r"""`C:\Users\VINICI~1\...` -> `C:\Users\ViniciusMoraisHDT\...`.
+    r"""`C:\Users\VINICI~1\...` -> `C:\Users\usuario\...`.
 
     UNICA consulta ao SO no caminho de classificacao, e ela existe porque o
     ENSAIO com duas sessoes reais (12/09) mediu o gate CEGO: uma sessao
     segurava `...VINICI~1...\compartilhado.py` e a outra editava
-    `...ViniciusMoraisHDT...\compartilhado.py`. `os.path.samefile` dizia True e
+    `...usuario...\compartilhado.py`. `os.path.samefile` dizia True e
     os ids eram diferentes, entao nenhuma via a outra. Nao e hipotetico: o
     diretorio de scratchpad entregue a cada sessao vem no formato 8.3, entao
     valeria para quase toda sessao.

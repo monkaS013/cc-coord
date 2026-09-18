@@ -3,7 +3,7 @@
 #           (b) agent_id aparece no payload dentro de subagente? (AC-009)
 #           (c) deny do PreToolUse funciona e a razao chega ao modelo? (AC-011)
 set -u
-BASE="C:/Users/ViniciusMoraisHDT/dev/cc-coord/tools/probe"
+BASE="C:/Users/usuario/dev/cc-coord/tools/probe"
 cd "$BASE" || exit 1
 
 rm -rf captures debug3.log resposta3.txt

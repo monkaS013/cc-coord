@@ -16,8 +16,8 @@ import sys
 import tempfile
 import time
 
-SRC = "C:/Users/ViniciusMoraisHDT/dev/cc-coord/src"
-HOOKS = r"C:\Users\ViniciusMoraisHDT\.claude\hooks"
+SRC = "C:/Users/usuario/dev/cc-coord/src"
+HOOKS = r"C:\Users\usuario\.claude\hooks"
 sys.path.insert(0, SRC)
 
 from ccoord import claims, sessions  # noqa: E402

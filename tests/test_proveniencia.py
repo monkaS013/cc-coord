@@ -233,7 +233,7 @@ class TestPeerNaHomeNaoBloqueiaRepo(unittest.TestCase):
     """Falso positivo achado pelo USO real (12/09), nao por teste.
 
     O gate recusou o meu proprio `git push` do cc-coord porque havia duas
-    sessoes ociosas em `C:\\Users\\ViniciusMoraisHDT`. A condicao antiga tratava
+    sessoes ociosas em `C:\\Users\\usuario`. A condicao antiga tratava
     peer em diretorio ANCESTRAL como "no mesmo repositorio" -- e a home e
     ancestral de tudo, entao uma sessao parada ali bloqueava commit e push de
     qualquer repo da maquina. Atrito puro, exatamente o defeito que a politica
