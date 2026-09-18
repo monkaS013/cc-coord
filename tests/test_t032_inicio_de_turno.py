@@ -399,6 +399,53 @@ class TestAchadosDaAuditoria(_Base):
             "a linha de erro nao diz QUAL sessao quebrou",
         )
 
+    def test_telemetria_prefere_o_payload_e_grava_agent_id(self):
+        """@spec:AC-026 a linha de erro identifica sessao E agente, preferindo o payload"""
+        # Duas coisas, ambas da 4a auditoria:
+        # (a) o payload e a fonte AUTORITATIVA quando existe -- quando a
+        #     excecao vem do `release`, ele ja foi lido; o env e fallback;
+        # (b) sem `agent_id`, duas linhas da mesma sessao sao indistinguiveis,
+        #     e a identidade de dono desta feature e o PAR (session_id,
+        #     agent_id), nunca a sessao sozinha.
+        # Uso valores DIFERENTES em env e payload para que o teste falhe se a
+        # ordem de precedencia inverter -- com valores iguais, ele passaria nos
+        # dois casos e nao provaria a ordem.
+        env = dict(os.environ)
+        env["CCOORD_HOME"] = self.home
+        env["CCOORD_SESSIONS_DIR"] = self.sessions
+        env["CCOORD_SRC"] = self._src_falso_que_levanta()
+        env["CLAUDE_CODE_SESSION_ID"] = "id-do-ambiente"
+
+        proc = subprocess.run(
+            [PYTHON, str(HOOKS / HOOK)],
+            input=json.dumps(self.payload(session_id="id-do-payload", agent_id="agente-42")),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            timeout=30,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr[:300])
+
+        with open(os.path.join(self.home, "events.log"), "r", encoding="utf-8") as fh:
+            erros = [
+                json.loads(l)
+                for l in fh
+                if l.strip() and json.loads(l).get("origem") == "coord_user_prompt"
+            ]
+        self.assertTrue(erros, "nao registrou a falha")
+        self.assertEqual(
+            erros[-1].get("session_id"),
+            "id-do-payload",
+            "a telemetria preferiu o ENV ao payload -- o payload e autoritativo "
+            "quando existe",
+        )
+        self.assertEqual(
+            erros[-1].get("agent_id"),
+            "agente-42",
+            "a linha de erro nao distingue main de subagente",
+        )
+
     def _src_falso_que_levanta(self) -> str:
         """Monta um pacote `ccoord` falso cujo `release` LEVANTA.
 

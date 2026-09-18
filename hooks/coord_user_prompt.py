@@ -65,7 +65,7 @@ import time
 _ORIGENS_QUE_NAO_ENCERRAM_TURNO = frozenset({"poll_event"})
 
 
-def _registrar_erro_local(exc: BaseException) -> None:
+def _registrar_erro_local(exc: BaseException, payload: dict | None = None) -> None:
     """Grava uma linha de erro no `events.log` SEM depender do pacote `ccoord`.
 
     Por que nao usar `hookio._registrar_erro`, que ja existe: o cenario que a
@@ -95,10 +95,23 @@ def _registrar_erro_local(exc: BaseException) -> None:
             # QUEM quebrou. Sem isto, N linhas identicas de erro nao distinguem
             # "uma sessao quebrada x 40 prompts" de "40 sessoes quebradas" -- e
             # nesta maquina ha varias sessoes simultaneas, que e o problema que
-            # esta feature inteira existe para tratar. O env serve mesmo quando
-            # o `import ccoord` falhou, que e justamente o cenario coberto aqui;
-            # nao da para usar `hookio.identidade` pelo mesmo motivo.
-            "session_id": os.environ.get("CLAUDE_CODE_SESSION_ID") or None,
+            # esta feature inteira existe para tratar.
+            #
+            # Ordem das fontes: o PAYLOAD primeiro, porque quando a excecao vem
+            # do `release` ele ja foi lido e e a fonte autoritativa; o env e o
+            # fallback, que cobre o caso em que nem o `import ccoord` funcionou
+            # (ai nao ha payload lido, e `hookio.identidade` nao existe para
+            # chamar). Medido em 18/09 que os dois concordam neste build -- o
+            # harness alimenta o env do spawn e o stdin JSON do MESMO objeto --,
+            # entao a ordem e defesa contra mudanca futura, nao correcao de
+            # divergencia atual.
+            "session_id": (payload or {}).get("session_id")
+            or os.environ.get("CLAUDE_CODE_SESSION_ID")
+            or None,
+            # Distingue main de subagente: sem isto, duas linhas da mesma sessao
+            # sao indistinguiveis, e a identidade de dono desta feature e o PAR
+            # (session_id, agent_id), nunca a sessao sozinha.
+            "agent_id": (payload or {}).get("agent_id") or None,
             "erro": repr(exc),
         }
         caminho = os.path.join(home, "events.log")
@@ -123,6 +136,10 @@ def _bootstrap_src_path() -> None:
 
 
 def main() -> int:
+    # Fora do `try` para que o `except` enxergue o que ja foi lido: se a
+    # excecao vier do `release`, o payload existe e e a fonte autoritativa de
+    # quem somos. Sem isto a telemetria so tinha o env como fonte.
+    payload: dict = {}
     try:
         _bootstrap_src_path()
         from ccoord import hookio, claims
@@ -146,7 +163,7 @@ def main() -> int:
         # de 17/09). Silencio na SAIDA, registro no events.log: quem investiga
         # depois precisa distinguir "rodou e nao havia o que liberar" de
         # "quebrou e ninguem soube".
-        _registrar_erro_local(exc)
+        _registrar_erro_local(exc, payload)
     return 0
 
 

@@ -215,13 +215,31 @@ class TestEncodingDoCliJson(unittest.TestCase):
             f"{compacto.stdout[:120]!r}",
         )
 
-        indentado = self._rodar_cli("status", "--json")
-        self.assertEqual(indentado.returncode, 0, indentado.stderr[:300])
-        self.assertGreater(
-            len([l for l in indentado.stdout.split(b"\n") if l.strip()]),
+        # TODOS os pontos de `--json`, nao so um de cada tipo: a versao anterior
+        # deste teste cobria 2 dos 5, e mutar o `indent` do `who` sobrevivia.
+        # Achado da 4a auditoria, e a segunda vez no mesmo ciclo que eu conserto
+        # UMA instancia e declaro a classe fechada -- dai a varredura completa.
+        for comando, args in (
+            ("status", ("status", "--json")),
+            ("who", ("who", self.path_com_acento, "--json")),
+        ):
+            with self.subTest(comando):
+                indentado = self._rodar_cli(*args)
+                self.assertEqual(indentado.returncode, 0, indentado.stderr[:300])
+                self.assertGreater(
+                    len([l for l in indentado.stdout.split(b"\n") if l.strip()]),
+                    1,
+                    f"`{comando} --json` tem de sair INDENTADO (indent=2), como "
+                    f"sempre saiu: {indentado.stdout[:120]!r}",
+                )
+
+        # E os tres compactos (indent=None), pelo mesmo motivo.
+        compacto_release = self._rodar_cli("release", "--mine", "--json")
+        self.assertEqual(
+            len([l for l in compacto_release.stdout.split(b"\n") if l.strip()]),
             1,
-            "`status --json` tem de sair INDENTADO (indent=2), como sempre saiu: "
-            f"{indentado.stdout[:120]!r}",
+            "`release --mine --json` tem de sair em UMA linha: "
+            f"{compacto_release.stdout[:120]!r}",
         )
 
     def test_status_json_sai_em_ascii_puro(self):
