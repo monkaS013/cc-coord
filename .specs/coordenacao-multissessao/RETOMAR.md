@@ -1,6 +1,34 @@
 # Como retomar a feature cc-coord
 
-> **Atualização 17/09/2026, 16h09 — pendência 1 INSTALADA e em produção.** São **9 hooks** agora.
+> **Atualização 18/09/2026 — pendência 1 ENTREGUE, em produção, e o ciclo de auditoria ENCERRADO.**
+> HEAD `345a141`, sincronizado com o remoto. 366 testes, `onp-spec verify` 27/27 com prova PASS,
+> `audit --ci` limpo, 9/9 entrypoints instalados batendo por sha256, 15 hooks de terceiros intactos.
+>
+> **Quatro auditorias adversariais**, e o veredito da última foi explícito: pode fechar, 0 ALTA,
+> nenhum risco de runtime em pé. O perfil converge e é o que justifica parar — rodada 1 (código) 5
+> achados/0 ALTA · rodada 2 (testes) **3 ALTA, todos sobre PROVA** · rodada 3 (o conserto da 2) 0
+> ALTA/2 MÉDIA · rodada 4 0 ALTA/1 MÉDIA já obsoleta. O achado migrou de "o código está errado" para
+> "a prova é fraca" para "o registro está impreciso".
+>
+> **O QUE FALTA, em ordem:**
+> 1. **T-034 — a prova em USO REAL.** É a única coisa que nenhuma auditoria substitui: precisa de uma
+>    janela de uso com o hook rodando. Rodar `scratchpad/mede_fronteira_turno.py` (o script está
+>    descrito em `medicao-fronteira-de-turno.md`) e exigir **os DOIS lados**: a fração de ciclos que
+>    atravessam ≥1 prompt cai de 20,1% para ~0 **E** as disputas de "mesmo turno" (40 em 5 dias, que
+>    são a feature funcionando) NÃO podem virar 0 — se virarem, o release está comendo turno vivo.
+> 2. Dívidas declaradas, medidas e sem dano observável: asserts de contagem tautológicos no
+>    `test_install` (entrada errada no `HOOKS_SPECS` passa), `agent_id=""` em claim JÁ GRAVADO em
+>    disco, `events.log` sem rotação, `sort_keys` no `--json`. E a pendência 3 original (atomicidade
+>    de `_renovar`, assimetria main×subagente), que tem spec própria.
+> 3. O delta dos commits `ef31698` e `345a141` não teve olho independente — decisão do Vinicius de
+>    parar, com o custo e o valor esperado na mesa.
+>
+> **Três coisas que custaram medição e não devem ser redescobertas:** este build **não envia** o campo
+> `source` no `UserPromptSubmit` (exigir `== "user"` deixaria o hook inerte); mensagem de peer vira
+> turno **próprio**, então liberar ali está certo; e o evento **não** dispara dentro de subagente
+> (medido com `SubagentStart` como controle negativo). Tudo em `medicao-hooks.md` §2-bis e §5-bis.
+>
+> **Atualização anterior (17/09, 16h09) — pendência 1 INSTALADA e em produção.** São **9 hooks** agora.
 > Verificado: `settings.json` com o hook novo ao lado do `context_alert.py` de terceiro (24 hooks, 15
 > de terceiros intactos), sha256 de 9/9 entrypoints batendo, backup `settings.json.bak-20260917-160928`,
 > e o hook instalado exercitado (exit 0, stdout vazio, claim liberado).
