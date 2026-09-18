@@ -469,6 +469,50 @@ class TestExecutar(unittest.TestCase):
             else:
                 os.environ["CCOORD_HOME"] = antigo
 
+    def test_registro_de_erro_acumula_nunca_trunca(self):
+        "dois erros seguidos deixam DUAS linhas: o events.log e append-only"
+        # Mutante `O_APPEND` -> `O_TRUNC` em `_registrar_erro` sobrevivia a toda
+        # a suite (medido em 18/09). O dano e desproporcional ao tamanho da
+        # mudanca: em producao esse arquivo tem 4,48 MB e e a unica fonte de
+        # medicao desta feature. Truncar apaga a evidencia sem sinal nenhum --
+        # e o sintoma ("o log so tem uma linha") nao aponta para a causa.
+        home = tempfile.mkdtemp(prefix="ccoord_test_hookio_append_")
+        antigo = os.environ.get("CCOORD_HOME")
+        os.environ["CCOORD_HOME"] = home
+        try:
+            def decisor_quebrado(_payload):
+                raise ValueError("falha proposital")
+
+            for i in range(2):
+                _capturar(
+                    hookio.executar,
+                    {"hook_event_name": "PreToolUse", "session_id": f"s{i}"},
+                    decisor_quebrado,
+                )
+
+            with open(os.path.join(home, "events.log"), "r", encoding="utf-8") as fh:
+                erros = [
+                    json.loads(l)
+                    for l in fh
+                    if l.strip() and json.loads(l).get("event") == "error"
+                ]
+            self.assertEqual(
+                len(erros),
+                2,
+                f"esperava 2 linhas de erro acumuladas, veio {len(erros)} -- se "
+                "veio 1, a escrita esta TRUNCANDO em vez de anexar",
+            )
+            # e as duas linhas tem de ser de sessoes DIFERENTES: se o teste
+            # passasse com duas copias da mesma, ele nao provaria acumulo.
+            self.assertEqual(
+                sorted(l.get("session_id") for l in erros), ["s0", "s1"]
+            )
+        finally:
+            if antigo is None:
+                os.environ.pop("CCOORD_HOME", None)
+            else:
+                os.environ["CCOORD_HOME"] = antigo
+
 
 if __name__ == "__main__":
     unittest.main()

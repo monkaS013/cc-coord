@@ -510,6 +510,76 @@ class TestAchadosDaAuditoria(_Base):
             "falso foi ignorado; o teste de excecao nao prova nada",
         )
 
+    def test_telemetria_acumula_nao_trunca_o_events_log(self):
+        """@spec:AC-026 duas falhas seguidas deixam DUAS linhas, nao uma"""
+        # O `_registrar_erro_local` abre o `events.log` com O_APPEND. Trocar
+        # por O_TRUNC sobrevivia a todos os testes (medido em 18/09) e o dano e
+        # desproporcional: este arquivo tem 4,48 MB em producao e e a UNICA
+        # fonte de medicao desta feature -- todas as decisoes de desenho de
+        # 17/09 sairam dele. Um hook que falha e trunca apaga a evidencia toda,
+        # e o sintoma seria "o log esta sempre com uma linha so", que ninguem
+        # liga ao hook.
+        env = dict(os.environ)
+        env["CCOORD_HOME"] = self.home
+        env["CCOORD_SESSIONS_DIR"] = self.sessions
+        env["CCOORD_SRC"] = os.path.join(self.tmp, "nao-existe")
+        env["CLAUDE_CODE_SESSION_ID"] = "sessao-que-quebrou"
+
+        import shutil
+
+        hook_isolado = os.path.join(self.tmp, "hook_isolado.py")
+        shutil.copy2(HOOKS / HOOK, hook_isolado)
+
+        for _ in range(2):
+            proc = subprocess.run(
+                [PYTHON, hook_isolado],
+                input=json.dumps(self.payload()),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                env=env,
+                timeout=30,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr[:300])
+
+        with open(os.path.join(self.home, "events.log"), "r", encoding="utf-8") as fh:
+            erros = [
+                json.loads(l)
+                for l in fh
+                if l.strip() and json.loads(l).get("origem") == "coord_user_prompt"
+            ]
+        self.assertEqual(
+            len(erros),
+            2,
+            f"esperava 2 linhas de erro acumuladas, veio {len(erros)} -- se veio "
+            "1, a escrita esta TRUNCANDO o events.log em vez de anexar",
+        )
+
+    def test_source_malformado_nao_derruba_nem_impede_o_release(self):
+        """@spec:AC-027 `source` de tipo errado (lista/dict/numero) nao quebra o hook"""
+        # A guarda `isinstance(origem, str)` existe porque `origem in frozenset`
+        # com uma LISTA levanta TypeError (lista nao e hashavel) -- e sem ela o
+        # hook cairia no fail-open e deixaria de liberar, silenciosamente, a
+        # cada prompt. Mutante removendo a guarda sobrevivia a todos os testes
+        # (medido em 18/09). Payload malformado nao e hipotetico: o campo
+        # `source` esta em rollout e o binario avisa que pode faltar.
+        for rotulo, valor in (
+            ("lista", ["poll_event"]),
+            ("dict", {"kind": "poll_event"}),
+            ("numero", 7),
+            ("bool", True),
+        ):
+            with self.subTest(rotulo):
+                _claim("file:alvo.md", _owner())
+                proc = self.rodar(self.payload(source=valor))
+                self.assertEqual(proc.returncode, 0, f"{rotulo}: {proc.stderr[:250]}")
+                self.assertEqual(proc.stdout, "", f"{rotulo}: falou no stdout")
+                self.assertFalse(
+                    _existe("file:alvo.md"),
+                    f"`source={rotulo}` impediu o release -- tipo errado nao pode "
+                    "virar 'nao encerra turno' por acidente",
+                )
+
     def test_nao_vacuidade_caminho_feliz_nao_polui_o_log_de_erro(self):
         """@spec:AC-026 controle: execucao normal NAO grava linha de erro"""
         # Sem isto, o teste acima passaria com um hook que registra erro sempre
