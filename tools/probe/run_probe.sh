@@ -2,7 +2,7 @@
 # Medicao da Task 1: captura payloads reais de hook e testa se FileChanged dispara
 # para alteracao feita por OUTRO processo (proxy de "outra sessao").
 set -u
-BASE="C:/Users/ViniciusMoraisHDT/dev/cc-coord/tools/probe"
+BASE="C:/Users/usuario/dev/cc-coord/tools/probe"
 cd "$BASE" || exit 1
 
 rm -rf captures debug.log resposta.txt

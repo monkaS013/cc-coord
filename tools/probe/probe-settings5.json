@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:/Python314/python.exe C:/Users/ViniciusMoraisHDT/dev/cc-coord/tools/probe/capture.py UserPromptSubmit"
+            "command": "C:/Python314/python.exe C:/Users/usuario/dev/cc-coord/tools/probe/capture.py UserPromptSubmit"
           }
         ]
       }
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:/Python314/python.exe C:/Users/ViniciusMoraisHDT/dev/cc-coord/tools/probe/capture.py SubagentStart"
+            "command": "C:/Python314/python.exe C:/Users/usuario/dev/cc-coord/tools/probe/capture.py SubagentStart"
           }
         ]
       }
@@ -26,7 +26,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:/Python314/python.exe C:/Users/ViniciusMoraisHDT/dev/cc-coord/tools/probe/deny_encoding.py"
+            "command": "C:/Python314/python.exe C:/Users/usuario/dev/cc-coord/tools/probe/deny_encoding.py"
           }
         ]
       }

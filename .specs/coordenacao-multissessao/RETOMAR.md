@@ -73,7 +73,7 @@
 Atualizado em 2026-09-11, fim do dia. Abrir a sessão dentro do repo:
 
 ```
-cd C:/Users/ViniciusMoraisHDT/dev/cc-coord && claude
+cd C:/Users/usuario/dev/cc-coord && claude
 ```
 
 ---

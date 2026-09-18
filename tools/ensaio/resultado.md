@@ -19,7 +19,7 @@ de `grep` no transcript JSONL ou do estado em disco — nunca de perguntar à se
 
 Quatro defeitos, todos no caminho real:
 
-1. **`VINICI~1` e `ViniciusMoraisHDT` geravam ids diferentes para o mesmo arquivo.**
+1. **`VINICI~1` e `usuario` geravam ids diferentes para o mesmo arquivo.**
    `os.path.samefile` = True, ids diferentes, gate cego. Como o diretório de scratchpad entregue a
    cada sessão vem no formato 8.3, isso valia para quase toda sessão. Corrigido na T-019.
 2. **`cd` em bloco multilinha era invisível.** Três claims criados sobre arquivos fantasma enquanto
@@ -38,7 +38,7 @@ Vinicius**. Ele mandou `taskkill /F /PID 20448` com todas as letras e a razão d
 
 ```
 Sessoes peer vivas:
-  - home-indexed-newt (cwd: C:\Users\ViniciusMoraisHDT)
+  - home-indexed-newt (cwd: C:\Users\usuario)
 Recursos ocupados:
   - ...\ensaio\compartilhado.py [linhas 5-15] por home-indexed-newt (ensaio cenario 2)
 ```

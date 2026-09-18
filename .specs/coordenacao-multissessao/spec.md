@@ -114,8 +114,8 @@ máquina (2.1.216 < 2.1.234 exigido no Windows nativo), e um broker caseiro nasc
 | `browser:<perfil>` | session | `browser:mcp-chrome-62f495f`, `browser:profile-b` |
 | `port:<n>` | session | `port:3100` |
 | `server:<repo>:<porta>` | session | `server:dashboard-im:8099` |
-| `git:<repo-abs>` | turn | `git:C--dev-workday-hdt-ts` |
-| `file:<path-abs-normalizado>` | turn | `file:C--dev-...-logcomex.py`, `file:C--Oscar Alho-Daily-2026-09-04.md` |
+| `git:<repo-abs>` | turn | `git:C--dev-app-exemplo` |
+| `file:<path-abs-normalizado>` | turn | `file:C--dev-...-logcomex.py`, `file:C--Meu Vault-Daily-2026-09-04.md` |
 | `db:<repo>:migrations` | session | `db:workday:migrations` |
 
 `file:` cobre o vault e a pasta de memória sem regra especial: qualquer path absoluto entra.

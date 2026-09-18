@@ -2,7 +2,7 @@
 # Rodada 2: qual canal (systemMessage x additionalContext) de cada evento chega ao MODELO,
 # e o FileChanged disparado por processo externo consegue avisar a sessao?
 set -u
-BASE="C:/Users/ViniciusMoraisHDT/dev/cc-coord/tools/probe"
+BASE="C:/Users/usuario/dev/cc-coord/tools/probe"
 cd "$BASE" || exit 1
 
 rm -rf captures debug2.log resposta2.txt

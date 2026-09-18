@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:/Python314/python.exe C:/Users/ViniciusMoraisHDT/dev/cc-coord/tools/probe/capture.py SessionStart"
+            "command": "C:/Python314/python.exe C:/Users/usuario/dev/cc-coord/tools/probe/capture.py SessionStart"
           }
         ]
       }
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:/Python314/python.exe C:/Users/ViniciusMoraisHDT/dev/cc-coord/tools/probe/capture.py UserPromptSubmit"
+            "command": "C:/Python314/python.exe C:/Users/usuario/dev/cc-coord/tools/probe/capture.py UserPromptSubmit"
           }
         ]
       }
@@ -26,7 +26,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:/Python314/python.exe C:/Users/ViniciusMoraisHDT/dev/cc-coord/tools/probe/capture.py PreToolUse"
+            "command": "C:/Python314/python.exe C:/Users/usuario/dev/cc-coord/tools/probe/capture.py PreToolUse"
           }
         ]
       }
@@ -37,7 +37,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:/Python314/python.exe C:/Users/ViniciusMoraisHDT/dev/cc-coord/tools/probe/capture.py PostToolUse"
+            "command": "C:/Python314/python.exe C:/Users/usuario/dev/cc-coord/tools/probe/capture.py PostToolUse"
           }
         ]
       }
@@ -47,7 +47,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:/Python314/python.exe C:/Users/ViniciusMoraisHDT/dev/cc-coord/tools/probe/capture.py PostToolBatch"
+            "command": "C:/Python314/python.exe C:/Users/usuario/dev/cc-coord/tools/probe/capture.py PostToolBatch"
           }
         ]
       }
@@ -58,7 +58,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:/Python314/python.exe C:/Users/ViniciusMoraisHDT/dev/cc-coord/tools/probe/capture.py FileChanged"
+            "command": "C:/Python314/python.exe C:/Users/usuario/dev/cc-coord/tools/probe/capture.py FileChanged"
           }
         ]
       }
@@ -68,7 +68,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:/Python314/python.exe C:/Users/ViniciusMoraisHDT/dev/cc-coord/tools/probe/capture.py Stop"
+            "command": "C:/Python314/python.exe C:/Users/usuario/dev/cc-coord/tools/probe/capture.py Stop"
           }
         ]
       }
@@ -78,7 +78,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:/Python314/python.exe C:/Users/ViniciusMoraisHDT/dev/cc-coord/tools/probe/capture.py SessionEnd"
+            "command": "C:/Python314/python.exe C:/Users/usuario/dev/cc-coord/tools/probe/capture.py SessionEnd"
           }
         ]
       }
@@ -88,7 +88,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:/Python314/python.exe C:/Users/ViniciusMoraisHDT/dev/cc-coord/tools/probe/capture.py Notification"
+            "command": "C:/Python314/python.exe C:/Users/usuario/dev/cc-coord/tools/probe/capture.py Notification"
           }
         ]
       }
@@ -98,7 +98,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:/Python314/python.exe C:/Users/ViniciusMoraisHDT/dev/cc-coord/tools/probe/capture.py SubagentStart"
+            "command": "C:/Python314/python.exe C:/Users/usuario/dev/cc-coord/tools/probe/capture.py SubagentStart"
           }
         ]
       }
@@ -108,7 +108,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:/Python314/python.exe C:/Users/ViniciusMoraisHDT/dev/cc-coord/tools/probe/capture.py SubagentStop"
+            "command": "C:/Python314/python.exe C:/Users/usuario/dev/cc-coord/tools/probe/capture.py SubagentStop"
           }
         ]
       }

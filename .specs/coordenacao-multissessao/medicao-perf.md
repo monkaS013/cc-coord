@@ -268,7 +268,7 @@ alheios do próprio Vinicius, `serve.py`/`widget.pyw`, não deste projeto — e 
 |---|---|---|---|
 | 1 | 0 | 137,68 ms | 7,15s de suíte |
 | 2 | 0 | 148,89 ms | 6,48s de suíte — passou raspando |
-| 3 (original) | **1** | 167,99 ms | 34min de suíte; 1 timeout de subprocess + gate estourado — causa confirmada: outros processos do Vinicius (`serve.py` do Data Center HDT, `widget.pyw` do Monitor de Uso Claude) consumindo CPU pesadamente no mesmo laptop (`Get-CimInstance Win32_Process` confirmou os PIDs e as linhas de comando) |
+| 3 (original) | **1** | 167,99 ms | 34min de suíte; 1 timeout de subprocess + gate estourado — causa confirmada: outros processos do Vinicius (`serve.py` do app interno, `widget.pyw` do Monitor de Uso Claude) consumindo CPU pesadamente no mesmo laptop (`Get-CimInstance Win32_Process` confirmou os PIDs e as linhas de comando) |
 | 3 (repetida, mesma máquina, minutos depois) | 0 | 106,37 ms | 6,69s de suíte |
 
 **Veredito:** RNF-04 passou a ser cumprido no caminho comum (import ~2x mais rápido,

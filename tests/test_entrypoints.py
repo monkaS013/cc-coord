@@ -308,7 +308,7 @@ class TestExit0CaminhoDeDeny(_AmbienteTemporario):
 
     def test_git_push_negado_com_peer_viva_no_mesmo_repo_sai_exit_0(self):
         "@spec:AC-007 git push com peer viva no mesmo repo gera deny, processo sai exit 0"
-        repo = "C:\\dev\\workday-hdt-ts"
+        repo = "C:\\dev\\app-exemplo"
         pid_vivo = os.getpid()
         _write_session_file(
             self.sessions_dir,
@@ -1300,7 +1300,7 @@ def _slug_path_como_nos_hooks(path: str) -> str:
 
     Era uma copia da normalizacao, escrita quando os hooks ainda nao tinham
     modulo comum. A copia envelheceu e mordeu em 12/09: ao ligar a resolucao de
-    nome curto 8.3 (`VINICI~1` -> `ViniciusMoraisHDT`) em `carimbos.slug_path`,
+    nome curto 8.3 (`VINICI~1` -> `usuario`) em `carimbos.slug_path`,
     o teste continuou gerando o slug antigo e 7 casos falharam apontando para o
     lugar errado -- o teste dizia "o aviso sumiu" quando o codigo estava certo e
     a copia e que estava velha. Teste que replica a logica que deveria checar

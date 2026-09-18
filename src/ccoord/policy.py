@@ -125,7 +125,7 @@ def _mesmo_repo(peer_cwd: Optional[str], repo_path: Optional[str]) -> bool:
     HOME como "no mesmo repositorio" de qualquer repo abaixo dela. Como a home
     e ancestral de tudo, **uma unica sessao ociosa ali bloqueava todo commit e
     push da maquina** -- o gate recusou o meu proprio push do cc-coord por causa
-    de duas sessoes paradas em `C:\\Users\\ViniciusMoraisHDT`.
+    de duas sessoes paradas em `C:\\Users\\usuario`.
 
     Atrito puro, do tipo que a politica existe para evitar: estar acima de um
     repo nao e evidencia de estar mexendo nele. O preco e um falso negativo

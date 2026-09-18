@@ -40,7 +40,7 @@ def _write_session(dir_path: Path, pid: int, **overrides) -> Path:
     rec = {
         "pid": pid,
         "sessionId": f"session-{pid}",
-        "cwd": "C:\\Users\\ViniciusMoraisHDT\\dev\\cc-coord",
+        "cwd": "C:\\Users\\usuario\\dev\\cc-coord",
         "startedAt": 1789157840941,
         "procStart": "134336314386097043",
         "version": "2.1.261",

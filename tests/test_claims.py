@@ -489,12 +489,12 @@ class TestClaims(unittest.TestCase):
 
     def test_slug_nao_colide_espaco_com_underscore_literal(self):
         "_slug() nao pode mapear duas resources diferentes pro mesmo slug"
-        # 'Oscar Alho' (pasta real do vault, com espaco) x 'Oscar_Alho' (com
+        # 'Meu Vault' (pasta real do vault, com espaco) x 'Oscar_Alho' (com
         # underscore) e o par concreto do achado: a versao antiga de _slug
         # substituia QUALQUER char fora de alnum/-._ por '_' -- mas '_' e um
         # char PERMITIDO que passa cru, entao espaco e underscore literal na
         # mesma posicao produziam o MESMO slug.
-        self.assertNotEqual(claims._slug("Oscar Alho"), claims._slug("Oscar_Alho"))
+        self.assertNotEqual(claims._slug("Meu Vault"), claims._slug("Oscar_Alho"))
         # generalizando: nenhum char literal isolado pode colidir com o
         # escape de outro char nessa posicao.
         self.assertNotEqual(claims._slug("a_b"), claims._slug("a b"))
@@ -506,10 +506,10 @@ class TestClaims(unittest.TestCase):
         dono_b = _owner("sessao-b", pid=os.getpid() + 1)
 
         r1 = claims.claim(
-            r"file:C:\Oscar Alho\arquivo.md",
+            r"file:C:\Meu Vault\arquivo.md",
             dono_a,
             900,
-            {"path": r"C:\Oscar Alho\arquivo.md"},
+            {"path": r"C:\Meu Vault\arquivo.md"},
             esta_vivo=lambda o: True,
         )
         self.assertTrue(r1.ok)
@@ -526,7 +526,7 @@ class TestClaims(unittest.TestCase):
         )
         self.assertTrue(r2.ok, "recurso de arquivo DIFERENTE nao pode ser negado por colisao de slug")
 
-        dono_do_espaco = claims.owner_of(r"file:C:\Oscar Alho\arquivo.md", esta_vivo=lambda o: True)
+        dono_do_espaco = claims.owner_of(r"file:C:\Meu Vault\arquivo.md", esta_vivo=lambda o: True)
         dono_do_underscore = claims.owner_of(r"file:C:\Oscar_Alho\arquivo.md", esta_vivo=lambda o: True)
         self.assertIsNotNone(dono_do_espaco)
         self.assertIsNotNone(dono_do_underscore)

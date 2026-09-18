@@ -39,7 +39,7 @@ class Resource:
 
     - kind: "file" | "browser" | "port" | "server" | "git" | "db" | "process"
     - id: identificador no namespace da spec §5.1 (ex. "file:c--dev-...-app.js",
-      "port:3100", "git:c--dev-workday-hdt-ts"). Sempre em minusculas — ver
+      "port:3100", "git:c--dev-app-exemplo"). Sempre em minusculas — ver
       `_normalize_path` para a razao (case-insensitividade do Windows).
     - path: caminho normalizado do arquivo/repo, no formato de exibicao
       (drive maiusculo, barras invertidas), quando aplicavel; None quando o
@@ -216,7 +216,7 @@ def _repo_short_name(path: str) -> str:
 
     A spec §5.1 usa nome curto nesses dois ("db:workday:migrations",
     "server:dashboard-im:8099"), diferente de `git:` que usa o path
-    absoluto inteiro ("git:C--dev-workday-hdt-ts"). Ver decisao no relato
+    absoluto inteiro ("git:C--dev-app-exemplo"). Ver decisao no relato
     final. Sempre chamada com `path` ja absoluto (o `cwd` efetivo, ver
     `_efetivo_cwd`) — sem cwd adicional para juntar.
     """
@@ -856,7 +856,7 @@ def _tokens_respeitando_aspas(texto: str) -> list:
     `sed -i 's/a/b/' "C:/.../Area de Trabalho/nota.md"` em tres alvos
     (`...\\Area`, `de`, `Trabalho\\nota.md`) e nenhum do arquivo real -- gate
     CEGO, nao ruidoso, em toda caminho com espaco (que aqui e a regra:
-    "Area de Trabalho", "Program Files", "OneDrive - HDT ENERGY").
+    "Area de Trabalho", "Program Files", "OneDrive - Empresa").
 
     Escrito a mao em vez de `shlex`: com `posix=True` ele come as contrabarras
     de caminho do Windows; com `posix=False` ele devolve as aspas coladas no
@@ -979,7 +979,7 @@ def _detectar_sed_inplace(command: str, cwd: str) -> list:
 
 
 _PS_WRITE_CMDLET = re.compile(r"\b(set-content|add-content|out-file)\b", re.IGNORECASE)
-# Aspas primeiro: `-Path "C:/OneDrive - HDT ENERGY/x.txt"` so vem inteiro se a
+# Aspas primeiro: `-Path "C:/OneDrive - Empresa/x.txt"` so vem inteiro se a
 # alternativa com aspas casar antes da sem aspas (T-024, AC-020).
 _PS_PATH_FLAG = re.compile(
     r"-(?:path|filepath)\s+(?:\"([^\"]+)\"|'([^']+)'|([^\"'\s]+))", re.IGNORECASE
@@ -1022,7 +1022,7 @@ def _detectar_tee(command: str, cwd: str) -> list:
     resources = []
     for m in _TEE_TRIGGER.finditer(command):
         # T-024/AC-020: mesmo tokenizador do `sed` -- com `.split()` cru,
-        # `tee "C:/Oscar Alho/Daily/2026-09-17 (copia).md"` virava quatro
+        # `tee "C:/Meu Vault/Daily/2026-09-17 (copia).md"` virava quatro
         # alvos quebrados e nenhum do arquivo real (achado da auditoria).
         for tok in _tokens_respeitando_aspas(m.group(1) or ""):
             if tok.startswith("-"):
@@ -1059,7 +1059,7 @@ def _detectar_copia_move(command: str, cwd: str) -> list:
         if not m:
             continue
         # T-024/AC-020: tokenizador que respeita aspas, senao
-        # `cp origem.md "C:/Oscar Alho/Daily/2026-09-17.md"` toma como destino
+        # `cp origem.md "C:/Meu Vault/Daily/2026-09-17.md"` toma como destino
         # o ULTIMO pedaco depois do espaco, e o claim sai no arquivo errado --
         # pior que nao avisar, porque avisa sobre outro arquivo.
         tokens = _tokens_respeitando_aspas(seg[m.end():])

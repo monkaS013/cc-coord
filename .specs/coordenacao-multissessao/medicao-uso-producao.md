@@ -53,7 +53,7 @@ sed -i 's/a/b/' "C:/Users/.../Área de Trabalho/nota.md"
 
 gerava claims em `...\Área`, `...\de`, `...\Trabalho\nota.md` — **e nenhum no arquivo real**. Gate
 cego, não ruidoso, em toda a família de caminho com espaço, que nesta máquina é a regra ("Área de
-Trabalho", "Program Files", "OneDrive - HDT ENERGY"). Mesma falha no `-Path` do PowerShell.
+Trabalho", "Program Files", "OneDrive - Empresa"). Mesma falha no `-Path` do PowerShell.
 
 ## Defeito 3 — 1.140 claims de turno nunca liberados (→ T-025, AC-021/022)
 

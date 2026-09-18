@@ -46,7 +46,7 @@ if str(SRC) not in sys.path:
 
 # Caminho REAL desta maquina, nao um acento inventado: o vault e a pasta de
 # memoria sao os dois hotspots medidos de colisao, e os dois tem acento.
-TEXTO = "peer home editou C:/Oscar Alho/Projetos/Inteligência de Mercado.md — colisão"
+TEXTO = "peer home editou C:/Meu Vault/Projetos/Inteligência de Mercado.md — colisão"
 
 
 def _rodar_sem_pythonioencoding(codigo: str) -> subprocess.CompletedProcess:
@@ -172,7 +172,7 @@ class TestEncodingDoCliJson(unittest.TestCase):
         os.environ["CCOORD_HOME"] = self.home
         from ccoord import claims
 
-        self.path_com_acento = "C:/Oscar Alho/Projetos/Inteligência de Mercado.md"
+        self.path_com_acento = "C:/Meu Vault/Projetos/Inteligência de Mercado.md"
         dono = claims.Owner(
             session_id="sessao-acentuada",
             pid=os.getpid(),

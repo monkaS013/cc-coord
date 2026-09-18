@@ -150,7 +150,7 @@ def _slug(resource: str) -> str:
     reais e distintos no disco do usuario) nunca podem virar o MESMO arquivo
     de claim. A versao antiga substituia QUALQUER char fora de alnum/-._  por
     '_' -- mas '_' e um char PERMITIDO (passava cru), entao um espaco e um
-    underscore literal na MESMA posicao produziam o mesmo slug: 'Oscar Alho'
+    underscore literal na MESMA posicao produziam o mesmo slug: 'Meu Vault'
     (a pasta real do vault) e 'Oscar_Alho' colidiam no msmo arquivo de claim,
     e o aviso de conflito citava um peer que nunca tinha tocado o arquivo real
     do outro. Achado por auditoria adversarial em 11/09, repro completo em
