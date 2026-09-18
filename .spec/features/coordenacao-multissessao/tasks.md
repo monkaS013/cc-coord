@@ -209,3 +209,18 @@
 - Refs: AC-012
 - Arquivos: .specs/coordenacao-multissessao/RETOMAR.md
 - Notas: Edit pontual no MEMORY.md, nunca reescrita.
+
+## T-038 - `ccoord status` agrupado por estado, nao lista crua [pendente]
+- Refs: AC-012
+- Arquivos: src/ccoord/cli.py, src/ccoord/sessions.py, tests/test_cli.py
+- Origem: avaliacao da doc `code.claude.com/docs/en/claude-projects` (18/09). O Overview de Projects agrupa threads em *Ready for review / Waiting on you / Working / Landing / Idle / Resolved*; o `ccoord status` de hoje devolve lista de peers + lista de claims, e quem le tem de cruzar na cabeca. O ganho e de LEITURA, nao de mecanismo -- o registro ja tem os dados.
+- **A forma NAO se transfere direto:** os rotulos deles sao de PR (`Ready for review`, `Landing`), que nao existem aqui. Traduzir para o dominio local, sem inventar estado que nao se mede:
+  - `Trabalhando` — peer viva (PID + `procStart`) com `updatedAt` dentro do TTL
+  - `Parada?` — rotulo `busy` com `updatedAt` estagnado alem do TTL (o caso medido em 11/09: 262 s de atraso enquanto a outra atualizava a cada ~40 s)
+  - `Ociosa` — viva e sem claim de turno
+  - `Segurando recurso` — viva com claim de `session` (browser/porta/servidor), com o recurso nomeado
+  - `Claim orfao` — claim em disco cujo dono nao esta vivo, ainda nao varrido pelo `sweep()`
+  - `Encerrada` — arquivo de sessao sem PID vivo
+- **Guardas que o teste tem de provar (todas ja custaram medicao):** (1) classificar pelo CONJUNTO de `status`, nunca por `== "idle"` — o vocabulario tem ao menos `busy|idle|waiting`; (2) `status` e indicio, `updatedAt`+PID e a decisao — uma peer `busy` com carimbo velho NAO pode sair como `Trabalhando`; (3) PID sozinho nao prova identidade (reuso) — casar com `procStart`; (4) sessao da propria maquina so: ignorar `pidDomain` diferente; (5) main x subagente com o mesmo `session_id`/`pid` e a sessao disputando consigo mesma (6 dos 55 casos do log de 17/09) — nao contar como peer separada.
+- Pronto quando: fixtures com os 6 estados produzem os 6 grupos, e o caso (2) tem controle de nao-vacuidade (o teste falha se a classificacao voltar a olhar so o rotulo).
+- Fora de escopo: qualquer mudanca de mecanismo (claims, policy, hooks). E so apresentacao sobre dado que ja existe.
