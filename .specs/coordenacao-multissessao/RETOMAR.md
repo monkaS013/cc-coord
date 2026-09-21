@@ -1,5 +1,46 @@
 # Como retomar a feature cc-coord
 
+> **Atualização 21/09/2026 — 9ª auditoria: 1 achado ALTA ABERTO (furto de alvo) e 1 débito declarado.**
+> HEAD `bd2e963`, **5 commits locais ainda SEM push**. 380 testes, 0 falhas. O push está segurado por
+> decisão do Vinicius enquanto a curva de regressão não fechar — e ela **não fechou**.
+>
+> **1. ACHADO ALTA, ABERTO — "furto de alvo" (target theft). PRÉ-EXISTENTE, não é regressão.**
+> Um kill com alvo explícito ANTES de um kill amplo sem alvo próprio faz o segundo herdar o id do
+> primeiro, e o comando inteiro sai `allow`. Reproduzido nas DUAS versões (idêntico antes e depois de
+> `bd2e963` — o commit não introduziu e não fechou):
+>
+> - Comando: `taskkill /F /IM notepad.exe; Get-Process | Where-Object { $_.Id -gt 0 } | ForEach-Object { Stop-Process -Id $_.Id }`
+> - `classify()` devolve só `['process:notepad.exe']`; `decide()` sem claim → **allow**. O segundo kill,
+>   que mata todo processo com `Id > 0`, não tem recurso nenhum representando-o.
+> - **Controle que discrimina:** o mesmo trecho amplo SOZINHO devolve `process:alvo-nao-identificado`
+>   → **deny**. Dois alvos explícitos distintos aparecem os dois (não há furto). O idioma legítimo do
+>   CIM (`$p = Get-CimInstance ...; $p | ForEach-Object { Stop-Process ... }`) continua allow — ou seja,
+>   o mecanismo que causa o furto é o MESMO que faz o caso legítimo funcionar.
+> - **Mecanismo:** em `classify.py`, `_alvo_a_esquerda_do_verbo` busca numa janela de 600 chars que
+>   atravessa `;`/`&&`/`||` de propósito. Quando o segmento do 2º verbo não tem candidato local, a
+>   janela alcança o alvo do 1º verbo, JÁ consumido. Como o alvo volta não-`None`, o ramo do sentinela
+>   (`elif _ALVO_INDETERMINADO not in alvos`) nunca roda para aquela posição.
+> - **Conserto proposto (não implementado):** não deixar a janela-à-esquerda reaproveitar alvo já
+>   atribuído a uma âncora anterior do mesmo comando, quando há mais de uma âncora. Cuidado: mexer
+>   nisso é mexer no mesmo mecanismo do caso legítimo do CIM — precisa dos dois controles acima como
+>   teste antes de qualquer edição.
+> - **Consequência para a mensagem do `bd2e963`:** ela afirma "o que não dá para identificar vira
+>   recusa, nunca omissão". A omissão sobrevive por outra porta. Publicar assim repete o erro que o
+>   `cdeebd1` já corrigiu uma vez ("o commit anterior alegava proteção que não existia").
+>
+> **2. DÉBITO DECLARADO — heredoc é tratado como comando, não como dado.** Mensagem de commit ou
+> documentação que CITE um kill com alvo explícito emite o sentinela e cai em aviso; o próprio
+> `bd2e963` precisou ser escrito por arquivo. **Custo medido, não estimado:** diferencial das duas
+> versões sobre **29.582 comandos únicos** dos JSONL de `~/.claude/projects/**` deu **6 divergências
+> (0,02%), 0 perda de cobertura, 0 exceções** — e as 6 são citação de kill em texto (5 delas do próprio
+> trabalho de auditoria), todas já com outro recurso de kill no mesmo comando. Ou seja, mudança de
+> GRAU, não allow→deny. Decisão: fica como débito, não conserto — o custo não paga mexer no
+> `classify.py` de novo. Tratar heredoc como literal é o conserto natural quando for a hora.
+>
+> **3. O que a 9ª auditoria confirmou LIMPO:** o teste novo `test_verbo_sem_alvo_emite_sentinela_...`
+> não é vacuidade — falha de fato contra o código velho nos dois casos. E o `bd2e963` não causou
+> nenhuma regressão de cobertura no corpus real.
+
 > **Atualização 18/09/2026 — pendência 1 ENTREGUE, em produção, e o ciclo de auditoria ENCERRADO.**
 > HEAD `345a141`, sincronizado com o remoto. 366 testes, `onp-spec verify` 27/27 com prova PASS,
 > `audit --ci` limpo, 9/9 entrypoints instalados batendo por sha256, 15 hooks de terceiros intactos.
