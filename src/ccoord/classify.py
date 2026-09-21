@@ -671,15 +671,59 @@ def _em_segmento_de_leitor(command: str, pos: int) -> bool:
     return False
 
 
-def _primeiro_alvo(command: str, ini: int = 0, fim: Optional[int] = None) -> Optional[str]:
-    """Primeiro alvo dos padroes na faixa, ignorando o que esta em segmento de leitor."""
+def _match_primeiro_alvo(command: str, ini: int = 0, fim: Optional[int] = None):
+    """Match do primeiro alvo na faixa, ignorando o que esta em segmento de leitor.
+
+    Devolve o MATCH, nao o alvo, porque quem chama precisa da POSICAO: duas
+    ocorrencias do mesmo nome sao selecoes diferentes, e so a posicao distingue
+    (ver `_alvos_de_kill`, 10a auditoria).
+    """
     if fim is None:
         fim = len(command)
     for pat in _KILL_TARGET_PATTERNS:
         for m in pat.finditer(command, ini, fim):
             if not _em_segmento_de_leitor(command, m.start()):
-                return _normaliza_alvo(m.group(1))
+                return m
     return None
+
+
+def _primeiro_alvo(command: str, ini: int = 0, fim: Optional[int] = None) -> Optional[str]:
+    """Primeiro alvo dos padroes na faixa, ignorando o que esta em segmento de leitor."""
+    m = _match_primeiro_alvo(command, ini, fim)
+    return _normaliza_alvo(m.group(1)) if m else None
+
+
+def _selecao_no_segmento(command: str, ini: int, pos_verbo: int) -> Optional[str]:
+    """`Get-Process <nome>` no proprio segmento e ANTES do verbo, o mais proximo.
+
+    Existe para separar selecao PROPRIA de selecao HERDADA. `Get-Process X |
+    Stop-Process` repetido duas vezes e retry legitimo: cada verbo tem a sua
+    selecao, no seu segmento. Sem esta tentativa o segundo verbo caia na janela
+    que atravessa separador, e ali ele nao se distingue de quem esta pegando
+    carona no alvo alheio (10a e 11a auditorias).
+
+    Duas restricoes que o corpus cobrou, na primeira versao desta funcao:
+     - so ANTES do verbo, nunca depois. E a forma do pipeline, e olhar o segmento
+       inteiro fazia um comando trocar `browser:chrome` por `process:pipe`, alvo
+       errado colhido de texto a direita;
+     - a MAIS PROXIMA do verbo, nao a primeira do segmento -- a mesma regra de
+       proximidade da janela a esquerda, pelo mesmo motivo: a primeira ocorrencia
+       pode ser decorativa, e preencher alvo onde nao ha faz PERDER o fail-closed
+       (um comando do corpus deixou de emitir o sentinela).
+    """
+    # Mesmo teto de distancia da janela irma: sem ele, um nome decorativo
+    # plantado longe (padding dentro de um `Where-Object`, por exemplo) vira
+    # "selecao propria" e MASCARA o fail-closed. Fronteira medida: com o decoy a
+    # 500 chars as duas versoes concordam; a 580 o HEAD emitia o sentinela e esta
+    # funcao devolvia o decoy -- `deny` virava `allow` (11a auditoria, 2a parte).
+    inicio = max(ini, pos_verbo - _JANELA_ALVO_A_ESQUERDA)
+    melhor = None
+    for m in _GET_PROCESS_NOME.finditer(command, inicio, pos_verbo):
+        if _em_segmento_de_leitor(command, m.start()):
+            continue
+        if melhor is None or m.start() > melhor.start():
+            melhor = m
+    return _normaliza_alvo(melhor.group(1)) if melhor else None
 
 
 def _extrair_alvo_kill(command: str) -> Optional[str]:
@@ -812,9 +856,23 @@ def _alvos_de_kill(command: str):
     alvos = []
     for pos in posicoes:
         ini, fim = _limites_do_segmento(command, pos)
-        alvo = _primeiro_alvo(command, pos, fim) or _primeiro_alvo(command, ini, fim)
+        # Ordem das tentativas, da mais confiavel para a menos: alvo depois do
+        # verbo, alvo no segmento do verbo, SELECAO no segmento do verbo
+        # (`Get-Process <nome> | Stop-Process`), e so entao a janela que
+        # atravessa separador. As tres primeiras sao selecao PROPRIA do verbo e
+        # valem sempre; a quarta e herdada de outro segmento e vale uma vez so.
+        alvo = (
+            _primeiro_alvo(command, pos, fim)
+            or _primeiro_alvo(command, ini, fim)
+            or _selecao_no_segmento(command, ini, pos)
+        )
         if alvo is None:
-            alvo = _alvo_a_esquerda_do_verbo(command, pos)
+            # `alvos_consumidos` so e passado quando ha MAIS DE UMA ancora: com um
+            # verbo so, a selecao a esquerda e o que alimenta o kill (idioma do
+            # CIM) e tem de valer sempre.
+            alvo = _alvo_a_esquerda_do_verbo(
+                command, pos, alvos_consumidos=alvos if len(posicoes) > 1 else ()
+            )
         if alvo:
             if alvo not in alvos:
                 alvos.append(alvo)
@@ -831,7 +889,7 @@ def _alvos_de_kill(command: str):
     return alvos
 
 
-def _alvo_a_esquerda_do_verbo(command: str, pos_verbo: int):
+def _match_a_esquerda_do_verbo(command: str, pos_verbo: int):
     """Alvo declarado ANTES do verbo, pela ocorrencia mais proxima dele.
 
     O idioma real de limpeza do chrome orfao do Playwright separa a selecao do
@@ -860,7 +918,42 @@ def _alvo_a_esquerda_do_verbo(command: str, pos_verbo: int):
                 continue
             if melhor is None or m.start() > melhor.start():
                 melhor = m
-    return _normaliza_alvo(melhor.group(1)) if melhor else None
+    return melhor
+
+
+def _alvo_a_esquerda_do_verbo(command: str, pos_verbo: int, alvos_consumidos=()):
+    """Alvo HERDADO de outro segmento, recusado se ja identificou outro verbo.
+
+    FURTO DE ALVO (9a auditoria): a janela atravessa `;`/`&&`/`||` de proposito,
+    porque a selecao que alimenta o kill costuma ficar no segmento anterior. Com
+    mais de um verbo, porem, ela alcancava o alvo JA consumido pelo verbo
+    anterior: o segundo kill herdava aquele id, voltava nao-None e escapava do
+    sentinela, saindo de CARONA no allow do primeiro. Medido: um comando que
+    encerrava todo processo com Id > 0 saia `allow` so por ter um alvo nomeado
+    antes.
+
+    Tres escolhas, uma rodada de auditoria cada:
+     - a recusa e sobre o candidato ELEITO, nao um filtro dentro do laco. Pular o
+       consumido e seguir procurando promove o segundo colocado, que num criterio
+       de PROXIMIDADE e o mais distante -- o decoy que esta regra existe para
+       evitar (3a auditoria: alvo ERRADO e pior que nenhum, porque nao casa com
+       claim e o kill sai liberado parecendo conferido);
+     - a recusa vale so para o alvo HERDADO. Selecao propria do segmento do verbo
+       e resolvida antes, em `_alvos_de_kill`, inclusive a forma `Get-Process
+       <nome> | Stop-Process` -- e o que faz o retry legitimo continuar passando
+       sem precisar chegar aqui (10a auditoria);
+     - a comparacao e por VALOR, e nao pela posicao do texto. Comparar posicao
+       deixava o furto voltar com ~12 caracteres: bastava plantar uma ocorrencia
+       inocua do nome (`; -name chrome;`) entre os dois kills para o segundo ter
+       uma "ocorrencia propria" que nao alimenta verbo nenhum (11a auditoria).
+    """
+    m = _match_a_esquerda_do_verbo(command, pos_verbo)
+    if m is None:
+        return None
+    alvo = _normaliza_alvo(m.group(1))
+    if alvos_consumidos and alvo in alvos_consumidos:
+        return None
+    return alvo
 
 
 def _recursos_do_alvo(alvo: str):

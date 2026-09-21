@@ -775,6 +775,125 @@ class TestBypassesDeKillReproduzidosPelaAuditoria(unittest.TestCase):
                     f"o kill do 4321 sumiu sem sentinela -> allow por omissao: {sorted(ids)}",
                 )
 
+    def test_alvo_ja_consumido_nao_identifica_o_proximo_kill(self):
+        "@spec:AC-028 o alvo do 1o verbo nao identifica o 2o, que sairia de carona no allow dele"
+        # 9a auditoria: `_alvo_a_esquerda_do_verbo` varre 600 chars ATRAVESSANDO o
+        # `;` -- de proposito, e e o que faz o idioma do CIM funcionar. Com DOIS
+        # verbos, o segundo (sem alvo no proprio segmento) alcancava o alvo JA
+        # consumido pelo primeiro, voltava nao-None, e o ramo do sentinela nunca
+        # rodava para aquela posicao. Medido ponta a ponta: `allow` para um comando
+        # que encerra todo processo com Id > 0, so porque ha um alvo nomeado antes.
+        furto = (
+            "taskkill /F /IM notepad.exe; Get-Process | Where-Object { $_.Id -gt 0 } "
+            "| ForEach-Object { Stop-Process -Id $_.Id }"
+        )
+        ids = {r.id for r in classify("Bash", {"command": furto}, "C:/tmp")}
+        self.assertIn(
+            "process:alvo-nao-identificado",
+            ids,
+            f"o 2o kill herdou o alvo do 1o e sai de carona no allow dele: {sorted(ids)}",
+        )
+
+    def test_selecao_a_esquerda_de_kill_unico_nao_vira_recusa(self):
+        "@spec:AC-028 contrapeso: idioma legitimo com a selecao antes do verbo continua identificado"
+        # Sem este contrapeso o teste acima passaria com um conserto burro (emitir o
+        # sentinela sempre que houver fallback a esquerda), que transformaria em deny
+        # os 6 comandos genuinos de limpeza de chrome orfao medidos no historico.
+        casos = [
+            (
+                "$p = Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\"; "
+                "$p | ForEach-Object { Stop-Process -Id $_.ProcessId }",
+                "browser:chrome.exe",
+            ),
+            ("Get-Process chrome | Stop-Process -Force", "browser:chrome"),
+        ]
+        for comando, esperado in casos:
+            with self.subTest(comando=comando[:40]):
+                ids = {r.id for r in classify("Bash", {"command": comando}, "C:/tmp")}
+                self.assertIn(esperado, ids, f"perdeu o alvo real: {sorted(ids)}")
+                self.assertNotIn(
+                    "process:alvo-nao-identificado",
+                    ids,
+                    f"idioma legitimo virou recusa: {sorted(ids)}",
+                )
+
+    def test_selecao_no_segmento_respeita_o_teto_de_distancia(self):
+        "@spec:AC-028 nome decorativo plantado LONGE do verbo nao mascara o fail-closed"
+        # 11a auditoria (2a parte): a busca de selecao propria nasceu sem o teto de
+        # distancia que a janela irma sempre teve. Sem ele, um nome plantado atras
+        # de padding -- aqui dentro de um `Where-Object` que filtra para vazio e
+        # nunca alimenta o `-Id` do verbo -- virava "selecao propria" e o comando
+        # saia allow onde antes havia recusa. Fronteira medida: a 500 chars as duas
+        # versoes concordam, a 580 divergiam.
+        pad = "x" * 580
+        cmd = (
+            f'Get-Process decoyname | Where-Object {{ $_.Id -eq "{pad}" }} '
+            "| Stop-Process -Id $x"
+        )
+        ids = {r.id for r in classify("Bash", {"command": cmd}, "C:/tmp")}
+        self.assertIn(
+            "process:alvo-nao-identificado",
+            ids,
+            f"decoy distante virou alvo e mascarou o fail-closed: {sorted(ids)}",
+        )
+        # Contrapeso: PERTO do verbo, a mesma selecao continua valendo como alvo
+        # real -- o teto restringe distancia, nao desliga a tentativa.
+        perto = "Get-Process chrome | Stop-Process -Force"
+        ids_perto = {r.id for r in classify("Bash", {"command": perto}, "C:/tmp")}
+        self.assertIn("browser:chrome", ids_perto, f"perdeu o alvo perto: {sorted(ids_perto)}")
+
+    def test_ocorrencia_plantada_do_nome_nao_da_selecao_propria_ao_2o_verbo(self):
+        "@spec:AC-028 plantar o nome entre os kills nao devolve a carona ao 2o verbo"
+        # 11a auditoria: a versao que comparava POSICAO de ocorrencia reabria o
+        # furto com ~12 caracteres. Bastava plantar uma ocorrencia inocua do nome
+        # entre os dois kills -- que nao alimenta verbo nenhum, nem precisa ser
+        # sintaxe valida -- para o 2o verbo ter uma "ocorrencia propria" e escapar
+        # do sentinela. Por isso a recusa do alvo HERDADO voltou a ser por valor,
+        # e o retry legitimo passou a ser resolvido pela selecao do proprio
+        # segmento, antes de chegar na janela que atravessa separador.
+        ataque = (
+            "Get-Process chrome | Stop-Process; -name chrome; "
+            "Get-Process | Where {$_.Id -gt 0} | Stop-Process -Force"
+        )
+        ids = {r.id for r in classify("Bash", {"command": ataque}, "C:/tmp")}
+        self.assertIn(
+            "process:alvo-nao-identificado",
+            ids,
+            f"ocorrencia plantada devolveu a carona ao 2o kill: {sorted(ids)}",
+        )
+
+    def test_retry_do_mesmo_alvo_com_selecao_propria_nao_vira_recusa(self):
+        "@spec:AC-028 contrapeso: dois verbos podem mirar o MESMO nome, cada um com sua selecao"
+        # 10a auditoria: a primeira versao do conserto comparava o TEXTO do alvo,
+        # e recusava este idioma de retry -- os dois verbos miram `chrome`, mas
+        # cada um tem a sua propria ocorrencia de `Get-Process chrome`. Furto e
+        # reaproveitar a MESMA ocorrencia; repetir a selecao nao e furto. Por isso
+        # a comparacao passou a ser por POSICAO, nao por valor.
+        retry = "Get-Process chrome | Stop-Process; Get-Process chrome | Stop-Process"
+        ids = {r.id for r in classify("Bash", {"command": retry}, "C:/tmp")}
+        self.assertIn("browser:chrome", ids, f"perdeu o alvo real: {sorted(ids)}")
+        self.assertNotIn(
+            "process:alvo-nao-identificado",
+            ids,
+            f"retry com selecao propria em cada verbo virou recusa: {sorted(ids)}",
+        )
+
+    def test_dois_alvos_explicitos_nao_acionam_o_sentinela(self):
+        "@spec:AC-028 contrapeso: cada verbo com alvo proprio continua rendendo os dois, sem recusa"
+        ids = {
+            r.id
+            for r in classify(
+                "Bash",
+                {"command": "taskkill /F /IM notepad.exe; taskkill /F /IM calc.exe"},
+                "C:/tmp",
+            )
+        }
+        self.assertEqual(
+            {"process:notepad.exe", "process:calc.exe"},
+            ids,
+            f"dois alvos explicitos deveriam render exatamente os dois: {sorted(ids)}",
+        )
+
     def test_alvo_em_segmento_anterior_ao_verbo_continua_sendo_achado(self):
         "@spec:AC-003 `Get-Process X;Stop-Process` acha X, e o decoy mais distante perde"
         # Idioma real de limpeza de chrome orfao do Playwright MCP: o nome vem

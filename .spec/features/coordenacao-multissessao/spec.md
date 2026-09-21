@@ -215,6 +215,13 @@ existe, liberado quando o turno acaba, e com a faixa onde o dono está agora.
 - **Então** ele termina com exit 0, stdout vazio, e o prompt do usuário segue
 - **E** com dono indeterminável (`session_id` vazio) nenhum claim é removido
 
+#### AC-028 — Alvo já consumido por um verbo anterior não identifica o próximo kill
+
+- **Dado** um comando com mais de um verbo de kill, em que o segundo não tem alvo no próprio segmento
+- **Quando** a busca de alvo à esquerda alcança um alvo que já foi atribuído a um verbo anterior
+- **Então** esse alvo não serve para identificar o segundo verbo, e a posição emite o sentinela de fail-closed, de modo que o comando inteiro não saia liberado pelo alvo já aprovado do primeiro
+- **E** o idioma legítimo de kill ÚNICO com a seleção à esquerda (`Get-CimInstance ... ; $p | ForEach-Object { ... }`, `Get-Process nome | ...`) continua sendo identificado pelo nome real, sem virar recusa
+
 ## Fora de escopo
 
 - Resolver o merge de trabalho concorrente: a feature evita a colisão, integrar continua sendo decisão do Vinicius.
