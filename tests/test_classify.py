@@ -754,6 +754,27 @@ class TestBypassesDeKillReproduzidosPelaAuditoria(unittest.TestCase):
             f"excedeu o teto e nao emitiu o sentinela de fail-closed: {sorted(ids)}",
         )
 
+    def test_verbo_sem_alvo_emite_sentinela_mesmo_havendo_outro_kill(self):
+        "@spec:AC-009 kill cujo alvo nao pode ser identificado nao some quando ha outro kill no comando"
+        # 8a auditoria: isolado, `find . -exec kill -9 4321 \;` ja caia em
+        # fail-closed. Mas com um SEGUNDO kill no mesmo comando, o 4321 sumia da
+        # lista inteira -- nao virava recurso nem sentinela, entao `decide()`
+        # nunca era chamada para ele, e o allow do outro alvo liberava os DOIS.
+        # A causa e uma assimetria: `_SEP_ENTRE_COMANDOS` nao corta em `|` nem
+        # em `{`, mas `_KILL_VERBO_EM_POSICAO` trata os dois como inicio de
+        # comando -- entao o verbo real cai no segmento do token leitor.
+        casos = [
+            'find . -iname "*.pid" -exec kill -9 4321 \\; ; taskkill /F /IM chrome.exe',
+            "git log | ForEach-Object { Stop-Process -Id 4321 -Force }; taskkill /F /IM notepad.exe",
+        ]
+        for comando in casos:
+            with self.subTest(comando=comando[:50]):
+                ids = {r.id for r in classify("Bash", {"command": comando}, "C:/tmp")}
+                self.assertTrue(
+                    any("4321" in i for i in ids) or "process:alvo-nao-identificado" in ids,
+                    f"o kill do 4321 sumiu sem sentinela -> allow por omissao: {sorted(ids)}",
+                )
+
     def test_alvo_em_segmento_anterior_ao_verbo_continua_sendo_achado(self):
         "@spec:AC-003 `Get-Process X;Stop-Process` acha X, e o decoy mais distante perde"
         # Idioma real de limpeza de chrome orfao do Playwright MCP: o nome vem

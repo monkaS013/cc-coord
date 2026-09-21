@@ -815,8 +815,17 @@ def _alvos_de_kill(command: str):
         alvo = _primeiro_alvo(command, pos, fim) or _primeiro_alvo(command, ini, fim)
         if alvo is None:
             alvo = _alvo_a_esquerda_do_verbo(command, pos)
-        if alvo and alvo not in alvos:
-            alvos.append(alvo)
+        if alvo:
+            if alvo not in alvos:
+                alvos.append(alvo)
+        elif _ALVO_INDETERMINADO not in alvos:
+            # Verbo achado e alvo NAO identificado: o fail-closed vale para ESTA
+            # posicao, nao so para o comando todo. Descartar em silencio fazia o
+            # kill sumir da lista quando havia um segundo kill identificavel --
+            # `decide()` nunca era chamada para ele e o allow do outro liberava
+            # os dois (8a auditoria). Mesma regra do teto de ancoras: o que nao
+            # da para identificar vira recusa, nunca omissao.
+            alvos.append(_ALVO_INDETERMINADO)
     if excedeu:
         alvos.append(_ALVO_INDETERMINADO)
     return alvos
