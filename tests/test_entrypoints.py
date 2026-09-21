@@ -1062,6 +1062,55 @@ class TestProvenienciaDoKillNoEntrypoint(_AmbienteTemporario):
         self.assertIn("peer-1", contexto, "o aviso tem de dizer QUEM perde trabalho")
         self.assertNotIn("pergunte ao Vinicius", contexto)
 
+    def _decisao_de(self, comando):
+        """Como `_decisao`, mas com o comando escolhido pelo teste.
+
+        `hook_event_name` e obrigatorio: sem ele o hook devolve `{}` e QUALQUER
+        assercao de "nao negou" passa por vacuidade -- foi o que aconteceu na
+        primeira versao deste teste, e so o contrapeso de deny acusou.
+        """
+        payload = {
+            "hook_event_name": "PreToolUse",
+            "session_id": "sessao-eu",
+            "tool_name": "Bash",
+            "tool_input": {"command": comando},
+            "cwd": self._tmp.name,
+        }
+        codigo, saida = self.run_hook("coord_pre_bash.py", payload)
+        self.assertEqual(codigo, 0, "o processo do hook sempre sai 0")
+        obj = _unica_linha_json(saida)
+        return (obj.get("hookSpecificOutput") or {}), saida
+
+    def test_comando_de_leitura_que_menciona_a_palavra_nao_e_barrado(self):
+        "@spec:AC-003 comando que so LE, com a palavra no texto, nao vira deny nem com dono vivo"
+        # Prova de PERCURSO do conserto de 21/09: os dois comandos abaixo foram
+        # barrados de verdade nesta maquina, na mesma sessao -- o segundo era o
+        # `git worktree add` que criaria o worktree para consertar o gate.
+        # Nenhum dos dois encosta em processo nenhum.
+        self._monta_kill_com_dono_vivo()
+        for comando in (
+            "python -c \"print('eventos de kill no log')\"",
+            "git worktree add ../x -b fix/kill-trigger-posicao",
+            "grep -n 'kill' src/ccoord/policy.py",
+        ):
+            with self.subTest(comando=comando):
+                hso, saida = self._decisao_de(comando)
+                self.assertNotEqual(
+                    hso.get("permissionDecision"),
+                    "deny",
+                    f"comando de leitura barrado pelo gate de processo: {saida!r}",
+                )
+
+    def test_kill_real_com_dono_vivo_continua_deny(self):
+        "@spec:AC-009 contrapeso: o conserto de posicao nao afrouxa o kill de verdade"
+        self._monta_kill_com_dono_vivo()
+        hso, saida = self._decisao_de("taskkill /IM chrome.exe /F")
+        self.assertEqual(
+            hso.get("permissionDecision"),
+            "deny",
+            f"kill de processo de peer viva tem de continuar recusado: {saida!r}",
+        )
+
     def test_kill_por_inferencia_minha_continua_deny_no_hook_real(self):
         "@spec:AC-009 sem o alvo nomeado pelo usuario, o hook mantem o deny (nao-vacuidade)"
         # Controle do teste acima: sem ele, um hook que parasse de negar TUDO

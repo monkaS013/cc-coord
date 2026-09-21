@@ -305,13 +305,175 @@ def _classify_notebook_edit(tool_input: dict, cwd: str):
 # Gate cego e pior que gate ausente: promete proteger e libera em silencio.
 # Na duvida, incluir o padrao -- falso positivo aqui custa um aviso a mais, falso
 # negativo custa o trabalho de uma sessao inteira.
-_KILL_TRIGGER = re.compile(
-    # Lista EXPLICITA de executaveis, nunca curinga: `\w*kill\b` cobriria
-    # `pskill` mas tambem casaria `skill` -- e o dono tem uma pasta `skills/`
-    # cheia delas. Falso positivo em kill vira recusa de comando inocente, que
-    # e o atrito que esta feature existe para evitar.
-    r"(\b(taskkill|tskill|pskill|pkill|kill|stop-process|spps)\b"
-    r"|\bwmic\b[^|;&]*\b(terminate|delete)\b"  # wmic ... call terminate | delete
+# --------------------------------------------------------------------------
+# POSICAO DE COMANDO (achado 21/09/2026)
+#
+# A lista explicita de executaveis ja evitava casar `skill`/`killer_app` -- a
+# palavra COLADA noutra. O que ela nao via e a palavra ISOLADA em posicao de
+# ARGUMENTO: `grep -n 'kill' policy.py`, `echo "deny de kill"`,
+# `git worktree add -b fix/kill-trigger`. Todos casavam, nenhum tem alvo, e
+# alvo ausente cai no fail-closed `process:alvo-nao-identificado` = DENY DURO.
+#
+# A assimetria que o comentario original nao previu: aqui falso positivo NAO
+# custa "um aviso a mais", custa a recusa de um comando de LEITURA. Medido duas
+# vezes na mesma sessao, e a segunda foi o gate barrando o conserto do proprio
+# gate (pelo nome do branch).
+#
+# Conserto: o VERBO so conta em posicao de comando (inicio, ou depois de
+# `|`, `&&`, `;`, `(`, nova linha), tolerando prefixos que nao trocam o verbo
+# (`sudo`, `nohup`, `env`, `do`, `then`, atribuicao `VAR=1`). Os padroes NAO
+# verbais (`wmic`, CIM/WMI, `.kill()`, `.terminate()`) seguem casando em
+# qualquer posicao -- nenhum deles aparece em texto inocente.
+_VERBOS_KILL = r"(?:taskkill|tskill|pskill|pkill|kill|stop-process|spps)"
+
+# Prefixos que NAO trocam o verbo: o que vem depois deles continua sendo o
+# comando. `start-process` antes de `start`, e os interpretadores com a flag
+# junto (`cmd /c`, `powershell -Command`) porque o verbo aninhado depois deles
+# e comando de verdade -- achado 4 da auditoria adversarial.
+_PREFIXOS_NEUTROS = (
+    r"(?:sudo|nohup|env|time|do|then|else|xargs|exec|command|eval|wsl"
+    r"|iex|invoke-expression|start-process|start"
+    r"|cmd(?:\.exe)?\s+/[ck]|powershell(?:\.exe)?\s+-(?:c|command)"
+    r"|pwsh|bash|sh|zsh)\s+"
+)
+
+_KILL_VERBO_EM_POSICAO = re.compile(
+    # Inicio de segmento: comeco da string, separador de shell, abertura de
+    # subshell -- ou `-exec`/`-execdir` do `find`, que iniciam um comando novo
+    # tanto quanto um `;` (achado proprio, 21/09: `find . -exec taskkill ...`).
+    # `{` e `}` sao inicio de comando tanto quanto `;`: todo o idioma
+    # PowerShell de matar processo passa por bloco
+    # (`... | ForEach-Object { Stop-Process ... }`, `if ($p) { ... }`).
+    # Achado pelo diferencial contra 29 mil comandos reais desta maquina, nao
+    # por inspecao -- nenhuma das duas auditorias tinha chegado nele.
+    r"(?:^|[|;&`\n{}]|\$\(|\(|\B-execdir\b|\B-exec\b|\B-okdir\b|\B-ok\b)\s*"
+    # Prefixo neutro, cada um podendo trazer as PROPRIAS flags antes do verbo:
+    # `xargs -I{} taskkill`, `sudo -u x taskkill`. Sem isto o prefixo so valia
+    # colado no verbo, e `xargs -I{}` virava bypass.
+    r"(?:" + _PREFIXOS_NEUTROS + r"(?:[-/]\S+\s+|\{\}\s+)*)*"
+    r"(?:\w+=\S*\s+)*"
+    # Caminho ate o executavel: `/c/Windows/System32/taskkill.exe //PID 1` e a
+    # forma que o proprio dono usa no Git Bash, e `C:\Windows\System32\...`
+    # aparece no PowerShell. Sem isto o verbo vem depois de `/` ou `\`, que nao
+    # e separador -- falso negativo. Achado pelo diferencial no corpus real.
+    r"(?:[A-Za-z]:)?(?:[\w.~$-]*[/\\])*"
+    + _VERBOS_KILL + r"\b",
+    re.IGNORECASE,
+)
+
+# Literais entre aspas: neutralizar OU preservar, e a escolha do default e o
+# ponto mais delicado deste arquivo.
+#
+# A 1a versao usava allowlist de EXECUCAO -- preservava o literal so depois de
+# `powershell -c`/`cmd /c`. A auditoria adversarial de 21/09 abriu 6 bypasses
+# nela de uma vez (`iex "taskkill ..."`, `& "taskkill" ...`,
+# `$c = "taskkill"; & $c`, `powershell -Command "cmd /c taskkill"`,
+# `wsl kill`, `Start-Process taskkill`): toda forma de executar string que nao
+# estivesse na lista tinha o verbo APAGADO junto com as aspas. Lista de
+# execucao e infinita; lista de leitura e curta.
+#
+# Invertido: o literal so e neutralizado quando o comando que o recebe e um
+# LEITOR conhecido (grep, echo, git, ...). Qualquer outro -- inclusive
+# desconhecido -- preserva o miolo. Falha para o lado de DETECTAR, que e a
+# assimetria certa: falso negativo custa o processo de uma peer, falso positivo
+# custa um aviso.
+_LITERAL = re.compile(r"'[^']*'|\"[^\"]*\"")
+
+_LEITORES = (
+    "echo", "print", "printf", "grep", "egrep", "fgrep", "rg", "ag", "ack",
+    "findstr", "sed", "awk", "cat", "type", "head", "tail", "less", "more",
+    "git", "ls", "dir", "find", "wc", "sort", "uniq", "diff", "jq",
+    # `python -c` executa, sim -- mas o caso legitimo (um `-c` que so le e
+    # menciona a palavra) e frequente, e o caso perigoso ja tem guarda propria
+    # em `_EXEC_DE_DENTRO` (os.system/subprocess/Popen).
+    "python", "python3", "py",
+)
+_SEPARADOR_DE_SEGMENTO = re.compile(r"[|;&`\n(]|\$\(")
+
+
+def _comando_do_segmento(texto_antes: str) -> str:
+    """Primeiro token do segmento de comando em que o literal esta."""
+    corte = 0
+    for m in _SEPARADOR_DE_SEGMENTO.finditer(texto_antes):
+        corte = m.end()
+    tokens = texto_antes[corte:].strip().split()
+    return tokens[0].lower().lstrip("\\/.").rsplit("\\", 1)[-1] if tokens else ""
+# Limitacao conhecida e assumida: `python -c "..."` NAO entra na excecao acima,
+# porque o caso legitimo (um `python -c` que so le arquivo e menciona a palavra)
+# e frequente e o ilegitimo e rebuscado. Para nao deixar o buraco aberto, um
+# `python -c` que chama shell de dentro do codigo continua contando como kill.
+_EXEC_DE_DENTRO = re.compile(
+    # Casa pelo METODO, nao pelo modulo: `__import__('os').system('taskkill ...')`
+    # nunca escreve o texto `os.system` e passava batido (achado proprio, 21/09).
+    r"(?:\.system\(|\.popen\(|\bpopen\(|\bsubprocess\b|\bPopen\b"
+    r"|\bcheck_call\b|\bcheck_output\b|\bos\.exec|\bexecv|\brun\()",
+)
+
+
+def _neutraliza_literais(command: str) -> str:
+    """Troca o miolo dos literais por espacos, preservando offsets e tamanho."""
+
+    def _troca(m):
+        bruto = m.group(0)
+        dono = _comando_do_segmento(command[: m.start()])
+        # Ser leitor NAO basta: leitor executa string com frequencia
+        # (`sed '1e <cmd>'`, `awk 'BEGIN{system("<cmd>")}'`,
+        # `git -c alias.k='!<cmd>' k`). A 2a auditoria abriu os quatro assim.
+        # O discriminante honesto nao e o nome do programa, e o MIOLO: kill de
+        # verdade precisa de ALVO (`/IM x`, `/PID n`, `-Name x`, `-Id n`).
+        # `grep -n 'kill'` e `git commit -m "kill switch"` nao tem alvo e
+        # seguem sendo menção; `sed '1e taskkill /F /IM chrome.exe'` tem.
+        if (
+            dono
+            and dono.removesuffix(".exe") in _LEITORES
+            and _extrair_alvo_kill(bruto) is None
+        ):
+            return " " * len(bruto)
+        # Preserva: troca so as ASPAS por `;`, mantendo o miolo e o tamanho. O
+        # conteudo continua legivel E o verbo fica em inicio de segmento, que e
+        # o que `_KILL_VERBO_EM_POSICAO` exige. Sem isto o verbo ficaria colado
+        # numa aspa, que nao e separador de comando -- falso NEGATIVO.
+        return ";" + bruto[1:-1] + ";"
+
+    return _LITERAL.sub(_troca, command)
+
+
+def _literal_carrega_comando_de_kill(command: str) -> bool:
+    """Algum literal contem verbo de kill COM ALVO, isto e, um comando embutido.
+
+    Independe de QUEM recebe o literal, e e por isso que existe: a 2a auditoria
+    furou a lista de leitores por tres portas diferentes
+    (`sed '1e <cmd>'`, `awk 'BEGIN{system("<cmd>")}'`,
+    `git -c alias.k='!<cmd>' k`), e preservar o literal nao resolvia porque o
+    verbo fica atras de `1e `, `!` ou `system(` -- nenhum e inicio de segmento.
+    O discriminante e o ALVO: kill de verdade nomeia o que morre; mencao nao.
+    Custo aceito: `grep "taskkill /F /IM chrome.exe" log.txt` (procurar a linha
+    exata num log) vira aviso. Erra para o lado de proteger.
+    """
+    for m in _LITERAL.finditer(command):
+        miolo = m.group(0)
+        if re.search(r"\b" + _VERBOS_KILL + r"\b", miolo, re.IGNORECASE) and (
+            _extrair_alvo_kill(miolo) is not None
+        ):
+            return True
+    return False
+
+
+def _tem_gatilho_kill(command: str) -> bool:
+    """Ha verbo de kill em posicao de comando, ou padrao nao verbal em qualquer lugar."""
+    if _KILL_NAO_VERBAL.search(command):
+        return True
+    if _literal_carrega_comando_de_kill(command):
+        return True
+    if _EXEC_DE_DENTRO.search(command) and re.search(
+        r"\b" + _VERBOS_KILL + r"\b", command, re.IGNORECASE
+    ):
+        return True
+    return bool(_KILL_VERBO_EM_POSICAO.search(_neutraliza_literais(command)))
+
+
+_KILL_NAO_VERBAL = re.compile(
+    r"(\bwmic\b[^|;&]*\b(terminate|delete)\b"  # wmic ... call terminate | delete
     # CIM/WMI moderno — achado ALTA da 5a auditoria (14/09). `wmic` esta
     # DEPRECADO no Windows 11; o caminho atual e
     # `Get-CimInstance Win32_Process | Invoke-CimMethod -MethodName Terminate`
@@ -331,6 +493,12 @@ _KILL_TARGET_PATTERNS = (
     # numa flag. Sem isto o kill por CIM caía no fail-closed genérico — protegido,
     # mas sem poder dizer QUEM perde o processo, que é metade do valor do aviso.
     re.compile(r"\bname\s*=\s*['\"]([^'\"]+)['\"]", re.IGNORECASE),
+    # Entre aspas PRIMEIRO: caminho de programa tem espaco
+    # (`/IM "C:\Program Files\Google\Chrome\chrome.exe"`), e o padrao sem aspas
+    # cortava no espaco, devolvendo `c:\program` -- id que nao casa com claim
+    # nenhum, logo kill liberado. Achado da 2a auditoria, 21/09.
+    re.compile(r"/im\s+\"([^\"]+)\"", re.IGNORECASE),
+    re.compile(r"-name\s+\"([^\"]+)\"", re.IGNORECASE),
     re.compile(r"/im\s+\"?([^\"\s]+)\"?", re.IGNORECASE),
     re.compile(r"-name\s+\"?([^\"\s,]+)\"?", re.IGNORECASE),
     re.compile(r"/pid\s+(\d+)", re.IGNORECASE),
@@ -351,11 +519,95 @@ _BROWSER_EXECUTAVEIS = tuple(
 )
 
 
+# Pontuacao de fecho que gruda no alvo quando o comando vem aninhado dentro de
+# um literal (`...system('taskkill /F /IM chrome.exe')` devolvia `chrome.exe')`).
+# Id com lixo na ponta nao casa com claim nenhum, e `claims.owner_of()` compara
+# string EXATA -- ou seja, o kill sairia LIBERADO. E o mesmo modo de falha do
+# curinga documentado em `_candidatos_wildcard`, por outra porta. Achado proprio
+# em 21/09, ao medir o conserto de posicao.
+_LIXO_NA_BORDA = "'\"`)]},;:"
+
+
+def _normaliza_alvo(bruto: str) -> Optional[str]:
+    """Deixa o alvo na forma que `claims.owner_of()` compara: nome do processo.
+
+    A comparacao com o claim e de string EXATA, entao qualquer sujeira grudada
+    faz o id nao casar e o kill sair LIBERADO -- detectar sem identificar nao
+    protege. Tres formas medidas em 21/09, todas pre-existentes ao conserto de
+    posicao: `chrome.exe>nul` (redirecionamento do cmd colado no nome),
+    `chrome.exe;stop-process` (segundo comando sem espaco antes do `;`) e
+    `c:\\program` (caminho com espaco cortado no meio).
+    """
+    alvo = bruto.strip().strip(_LIXO_NA_BORDA)
+    # Escape que o PROPRIO shell come antes de executar: `ch^rome.exe` no
+    # cmd.exe e `chro`me.exe` no PowerShell chegam ao SO como `chrome.exe`.
+    # Provado em runtime na 3a auditoria (`cmd //c "echo ch^rome.exe"` imprime
+    # `chrome.exe`). Nenhum nome de processo real usa esses caracteres, entao
+    # remover e seguro -- e nao remover era um kill de peer saindo LIBERADO.
+    alvo = alvo.replace("^", "").replace("`", "")
+    # operador de shell colado no nome: corta no primeiro
+    alvo = re.split(r"[>|<&;]", alvo, maxsplit=1)[0]
+    # caminho completo -> nome do executavel (o claim guarda o nome, nao o path)
+    alvo = alvo.replace("/", "\\").rsplit("\\", 1)[-1]
+    return alvo.strip().strip(_LIXO_NA_BORDA) or None
+
+
+_VERBO_EM_QUALQUER_POSICAO = re.compile(r"\b" + _VERBOS_KILL + r"\b", re.IGNORECASE)
+
+# Separadores de COMANDO. O pipe simples NAO entra: `Get-Process chrome |
+# Stop-Process` e um comando so, e o alvo mora do lado esquerdo do pipe.
+_SEP_ENTRE_COMANDOS = re.compile(r"&&|\|\||[;&\n]")
+
+
+def _segmento_do_verbo(command: str, pos_verbo: int) -> str:
+    """Trecho do comando que contem o verbo, entre separadores de comando.
+
+    Existe por causa da 4a auditoria: o fallback "procura no comando inteiro"
+    reabria o decoy no idioma `Get-Process X | Stop-Process`, onde o trecho
+    DEPOIS do verbo nao tem flag de alvo nenhuma. Com um `/im decoy.exe`
+    plantado num `echo` anterior, o gate passava a acusar o processo errado --
+    `browser:firefox.exe` enquanto o chrome da peer morria, e o pior e que
+    parecia conferido. Prender a busca ao segmento mantem o CIM funcionando
+    (o alvo vem antes do verbo, mas no MESMO segmento) e corta o decoy, que
+    por definicao mora em outro comando.
+    """
+    inicio = 0
+    for m in _SEP_ENTRE_COMANDOS.finditer(command, 0, pos_verbo):
+        inicio = m.end()
+    m_fim = _SEP_ENTRE_COMANDOS.search(command, pos_verbo)
+    fim = m_fim.start() if m_fim else len(command)
+    return command[inicio:fim]
+
+
 def _extrair_alvo_kill(command: str) -> Optional[str]:
-    for pat in _KILL_TARGET_PATTERNS:
-        m = pat.search(command)
-        if m:
-            return m.group(1)
+    """Alvo do kill, preferindo o que vem DEPOIS do verbo.
+
+    DECOY (3a auditoria, 21/09): buscar no comando inteiro fazia
+    `echo teste /im "decoy.exe" ; taskkill /F /IM chrome.exe` devolver
+    `decoy.exe`. O gate entao protegia o processo ERRADO -- pior que nao
+    proteger, porque `owner_of("process:decoy.exe")` da None e o kill do chrome
+    da peer sai liberado parecendo conferido.
+
+    O fallback para o comando inteiro nao e preguica: no idioma real do CIM
+    (`Get-CimInstance -Filter "Name='chrome.exe'" | ForEach { Stop-Process }`)
+    o alvo vem ANTES do verbo, e cortar no verbo viraria falso negativo. Tenta
+    depois do verbo; so entao o texto todo.
+    """
+    m_verbo = _VERBO_EM_QUALQUER_POSICAO.search(command)
+    if m_verbo:
+        # 1o depois do verbo; 2o o segmento inteiro (CIM poe o alvo antes do
+        # verbo). NUNCA o comando inteiro -- era por ali que o decoy entrava.
+        trechos = [
+            command[m_verbo.start():],
+            _segmento_do_verbo(command, m_verbo.start()),
+        ]
+    else:
+        trechos = [command]
+    for trecho in trechos:
+        for pat in _KILL_TARGET_PATTERNS:
+            m = pat.search(trecho)
+            if m:
+                return _normaliza_alvo(m.group(1))
     return None
 
 
@@ -412,7 +664,7 @@ _GET_PROCESS_NOME = re.compile(
 
 
 def _detectar_kill(command: str):
-    if not _KILL_TRIGGER.search(command):
+    if not _tem_gatilho_kill(command):
         return []
     alvo = _extrair_alvo_kill(command)
     if alvo is None:

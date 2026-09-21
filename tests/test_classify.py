@@ -475,6 +475,48 @@ class TestBypassesDeKillReproduzidosPelaAuditoria(unittest.TestCase):
         "Get-Process chrome | Stop-Process -Force",
         "Stop-Process -Id 12345 -Force",
         "pkill -f chrome",
+        # Contrapeso do conserto de posicao (21/09): o verbo dentro do literal
+        # de um INTERPRETADOR continua sendo comando -- neutralizar esse literal
+        # seria falso negativo, o erro caro.
+        'powershell -c "Stop-Process -Name chrome"',
+        'cmd /c "taskkill /F /IM chrome.exe"',
+        "python -c \"import subprocess; subprocess.run(['taskkill','/F','/PID','1'])\"",
+        # Os 6 bypasses que a auditoria adversarial de 21/09 abriu na PRIMEIRA
+        # versao do conserto de posicao. A causa era uma so: eu tinha uma
+        # allowlist de EXECUCAO (so `powershell -c`/`cmd /c` preservavam o
+        # literal), entao toda forma de executar string que nao estivesse na
+        # lista apagava o verbo junto com as aspas. Trocado por allowlist de
+        # LEITURA (falha para o lado de detectar). Cada linha abaixo saiu de
+        # uma medicao main-vs-patch, nao de hipotese.
+        'iex "taskkill /F /IM chrome.exe"',
+        'Invoke-Expression "Stop-Process -Name chrome -Force"',
+        '& "taskkill" /F /IM chrome.exe',
+        '$cmd = "taskkill"; & $cmd /F /IM chrome.exe',
+        'powershell -Command "cmd /c taskkill /F /IM chrome.exe"',
+        "wsl kill -9 1234",
+        'Start-Process taskkill -ArgumentList "/F","/IM","chrome.exe"',
+        # Segunda rodada, achados proprios ao medir a allowlist de LEITURA: o
+        # risco dela e o inverso do anterior -- um leitor da lista usado para
+        # EXECUTAR. `-exec` do find inicia comando novo; `xargs` so valia colado
+        # no verbo; e `__import__('os').system(...)` nunca escreve o texto
+        # `os.system`, entao escapava da guarda de execucao de dentro.
+        "find . -exec taskkill /F /IM chrome.exe \\;",
+        "grep -rl x . | xargs -I{} taskkill /F /PID 4242",
+        "python -c \"__import__('os').system('taskkill /F /IM chrome.exe')\"",
+        # Terceira rodada, 2a auditoria adversarial: LEITOR usado para EXECUTAR.
+        # Ser `sed`/`awk`/`git` nao basta, e preservar o literal tambem nao
+        # resolvia (o verbo fica atras de `1e `, `!` ou `system(`, que nao sao
+        # inicio de segmento). O discriminante virou o ALVO dentro do literal.
+        "sed '1e taskkill /F /IM chrome.exe' arquivo.txt",
+        "awk 'BEGIN{system(\"taskkill /F /IM chrome.exe\")}'",
+        "git -c alias.k='!taskkill /F /IM chrome.exe' k",
+        "find . -ok taskkill /F /IM chrome.exe \\;",
+        "find . -okdir taskkill /F /IM chrome.exe \\;",
+        # Achados do DIFERENCIAL contra 29 mil comandos reais desta maquina --
+        # os dois idiomas que ela de fato usa e que nenhuma auditoria pegou.
+        "Get-CimInstance Win32_Process | ForEach-Object { Stop-Process -Name chrome -Force }",
+        "/c/Windows/System32/taskkill.exe //PID 17556 //F",
+        "C:\\Windows\\System32\\taskkill.exe /F /IM chrome.exe",
     ]
 
     # O contrapeso: o dono tem uma pasta `skills/` cheia de arquivos, e um
@@ -488,6 +530,29 @@ class TestBypassesDeKillReproduzidosPelaAuditoria(unittest.TestCase):
         "cat skill.md",
         "npm run build",
         "grep -r kill_switch src/",
+    ]
+
+    # Achado 21/09/2026: a lista INOCENTES so cobre a palavra COLADA noutra
+    # (`skills`, `killer_app`, `kill_switch`) -- essas o `\b` da lista explicita
+    # ja protegia. A palavra ISOLADA, como argumento de busca ou dentro de um
+    # literal, casava o gatilho e caia no fail-closed
+    # `process:alvo-nao-identificado`, isto e, DENY DURO num comando que so LE.
+    # Medido duas vezes na mesma sessao: um `python -c` lendo o events.log e um
+    # `git worktree add -b fix/kill-trigger-posicao` (o gate barrou o conserto
+    # do proprio gate, pelo nome do branch).
+    MENCOES = [
+        "grep -n 'kill' src/ccoord/policy.py",
+        "python -c \"print('eventos de kill no log')\"",
+        'echo "contando deny de kill"',
+        "git worktree add ../x -b fix/kill-trigger-posicao",
+        "rg --files-with-matches kill .",
+        "python -c \"print('Stop-Process')\"",
+        # Contrapeso da regra "literal com ALVO e comando": mencao sem alvo
+        # continua sendo mencao, mesmo em leitor que executa string.
+        'git commit -m "adiciona kill switch"',
+        "sed -n '/kill/p' file.txt",
+        "jq '.kill' data.json",
+        'git log --grep="kill switch"',
     ]
 
     def test_todas_as_formas_de_kill_sao_reconhecidas(self):
@@ -509,6 +574,107 @@ class TestBypassesDeKillReproduzidosPelaAuditoria(unittest.TestCase):
                 self.assertFalse(
                     any(t in ("browser", "process") for t in tipos),
                     f"falso positivo: {comando!r} foi classificado como kill (tipos={tipos})",
+                )
+
+    def test_alvo_aninhado_em_literal_sai_sem_pontuacao_grudada(self):
+        "@spec:AC-003 alvo extraido de comando aninhado nao carrega aspa/parentese no id"
+        # Detectar sem identificar nao protege: `claims.owner_of()` compara
+        # string EXATA, entao `browser:chrome.exe')` nao casa com o claim
+        # `browser:chrome.exe` e o kill sairia LIBERADO -- mesmo modo de falha
+        # do curinga, por outra porta.
+        recursos = classify(
+            "Bash",
+            {"command": "python -c \"__import__('os').system('taskkill /F /IM chrome.exe')\""},
+            "C:/tmp",
+        )
+        ids = {r.id for r in recursos}
+        self.assertIn("browser:chrome.exe", ids, f"id sujo nao casa com claim: {ids}")
+
+    def test_alvo_normalizado_casa_com_a_chave_do_claim(self):
+        "@spec:AC-003 redirecionamento, comando colado e caminho com espaco nao sujam o id do alvo"
+        # Tres defeitos PRE-EXISTENTES achados pela 2a auditoria adversarial em
+        # 21/09 -- nao vieram do conserto de posicao, ja estavam em producao.
+        # Nos tres o gate DETECTAVA e liberava assim mesmo, porque
+        # `claims.owner_of()` compara string exata e o id saia sujo.
+        casos = [
+            # `>nul` do cmd.exe grudava no nome do executavel
+            ("taskkill /F /IM chrome.exe>nul", "browser:chrome.exe"),
+            # dois kills no mesmo comando, sem espaco antes do `;`
+            ("Stop-Process -Name chrome.exe;Stop-Process -Name notepad.exe", "browser:chrome.exe"),
+            # caminho completo entre aspas: o alvo saia como `c:\\program`
+            ('taskkill /F /IM "C:\\Program Files\\Google\\Chrome\\chrome.exe"', "browser:chrome.exe"),
+            # 3a auditoria: escape que o PROPRIO shell come antes de executar.
+            # Provado em runtime pelo auditor -- `cmd //c "echo ch^rome.exe"`
+            # imprime `chrome.exe`, e o backtick some no parser do PowerShell
+            # mesmo fora de string. O taskkill real mata o chrome; o
+            # classificador via um nome que nao existe.
+            ("taskkill /F /IM ch^rome.exe", "browser:chrome.exe"),
+            ("taskkill /F /IM chro`me.exe", "browser:chrome.exe"),
+            # 3a auditoria: DECOY. O extrator pegava o primeiro `/im` do texto
+            # inteiro, entao um `echo` inocente antes sequestrava o alvo e o
+            # gate passava a proteger o processo errado -- pior que nao
+            # proteger, porque parece protegido.
+            ('echo teste /im "decoy.exe" ; taskkill /F /IM chrome.exe', "browser:chrome.exe"),
+            ('echo -name "decoy-proc" ; Stop-Process -Name chrome.exe', "browser:chrome.exe"),
+            # Controle: alvo legitimo ANTES do verbo (idioma real do CIM) tem
+            # de continuar sendo achado -- e o que impede o conserto do decoy
+            # de virar falso negativo.
+            (
+                'Get-CimInstance Win32_Process -Filter "Name=\'chrome.exe\'" | ForEach-Object { Stop-Process -Id $_.ProcessId }',
+                "browser:chrome.exe",
+            ),
+        ]
+        for comando, esperado in casos:
+            with self.subTest(comando=comando):
+                ids = {r.id for r in classify("Bash", {"command": comando}, "C:/tmp")}
+                self.assertIn(
+                    esperado,
+                    ids,
+                    f"id sujo nao casa com claim -> kill sai LIBERADO: {ids}",
+                )
+
+    def test_decoy_em_outro_comando_nao_sequestra_o_alvo(self):
+        "@spec:AC-003 alvo plantado em comando anterior nao vira o alvo do kill"
+        # 4a auditoria: o fallback "procura no comando inteiro" reabria o decoy
+        # justamente no idioma `Get-Process X | Stop-Process`, onde o trecho
+        # depois do verbo nao tem flag de alvo nenhuma. O pior caso nao e
+        # deixar passar: e ACUSAR O PROCESSO ERRADO -- `browser:firefox.exe`
+        # enquanto o chrome de uma peer morre, com o gate parecendo conferido.
+        casos = [
+            ('echo "/im decoy.exe" ; Get-Process chrome | Stop-Process', "decoy.exe"),
+            ('echo "-id 9999" ; Get-Process chrome | Stop-Process', "9999"),
+            ('echo "/im firefox.exe" ; Get-Process chrome | Stop-Process', "firefox.exe"),
+            ('echo "/im chrome.exe" ; Get-Process notepad | Stop-Process', "chrome.exe"),
+        ]
+        for comando, decoy in casos:
+            with self.subTest(comando=comando):
+                ids = {r.id for r in classify("Bash", {"command": comando}, "C:/tmp")}
+                self.assertFalse(
+                    any(decoy in i for i in ids),
+                    f"decoy {decoy!r} sequestrou o alvo -> gate protege o processo ERRADO: {ids}",
+                )
+                self.assertTrue(ids, f"o kill tem de continuar sendo detectado: {ids}")
+
+    def test_alvo_do_pipe_do_get_process_continua_sendo_achado(self):
+        "@spec:AC-003 contrapeso: `Get-Process X | Stop-Process` sem decoy identifica X"
+        ids = {r.id for r in classify(
+            "Bash", {"command": "Get-Process chrome | Stop-Process -Force"}, "C:/tmp"
+        )}
+        self.assertTrue(
+            any("chrome" in i for i in ids),
+            f"sem decoy o alvo do pipe tem de ser identificado, senao o conserto virou cegueira: {ids}",
+        )
+
+    def test_mencao_da_palavra_fora_de_posicao_de_comando_nao_vira_kill(self):
+        "@spec:AC-003 palavra isolada em argumento ou dentro de literal nao vira recurso de processo"
+        for comando in self.MENCOES:
+            with self.subTest(comando=comando):
+                recursos = classify("Bash", {"command": comando}, "C:/tmp")
+                tipos = [r.kind for r in recursos]
+                ids = [r.id for r in recursos]
+                self.assertFalse(
+                    any(t in ("browser", "process") for t in tipos),
+                    f"falso positivo (vira DENY fail-closed): {comando!r} -> {ids}",
                 )
 
     def test_curinga_no_alvo_do_kill_expande_para_grafias_reais_de_browser(self):
