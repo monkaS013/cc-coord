@@ -655,6 +655,48 @@ class TestBypassesDeKillReproduzidosPelaAuditoria(unittest.TestCase):
                 )
                 self.assertTrue(ids, f"o kill tem de continuar sendo detectado: {ids}")
 
+    def test_decoy_DEPOIS_do_verbo_tambem_nao_sequestra_o_alvo(self):
+        "@spec:AC-003 decoy plantado em comando posterior tambem nao vira o alvo do kill"
+        # A 5a auditoria achou o simetrico do caso anterior, e ele e pior:
+        # o caminho PRIMARIO da extracao (`command[pos_do_verbo:]`) ia ate o FIM
+        # da string, atravessando `;`/`&`/`\n`. So o fallback estava preso ao
+        # segmento -- entao um decoy DEPOIS do verbo sequestrava o alvo antes de
+        # o trecho protegido sequer ser tentado. Pre-existente (identico no
+        # codigo antigo), mas o comentario e a mensagem do commit alegavam
+        # protecao que nao existia nesse caminho.
+        casos = [
+            ('taskkill /F /PID 1234 & echo "/im chrome.exe"', "1234", "chrome.exe"),
+            ("taskkill /F /PID 1234 ; echo /im chrome.exe", "1234", "chrome.exe"),
+            ('Stop-Process -Id 1234 ; echo "-Name chrome.exe"', "1234", "chrome.exe"),
+            ('pkill -9 sshd ; echo "-Name chrome.exe"', "sshd", "chrome.exe"),
+        ]
+        for comando, real, decoy in casos:
+            with self.subTest(comando=comando):
+                ids = {r.id for r in classify("Bash", {"command": comando}, "C:/tmp")}
+                self.assertFalse(
+                    any(decoy in i for i in ids),
+                    f"decoy posterior sequestrou o alvo -> gate protege o errado: {ids}",
+                )
+                self.assertTrue(
+                    any(real in i for i in ids),
+                    f"o alvo REAL tem de ser identificado, senao so troquei um erro por outro: {ids}",
+                )
+
+    def test_get_process_no_pipe_tambem_respeita_o_segmento(self):
+        "@spec:AC-003 o nome vindo de `Get-Process X | Stop-Process` sai do segmento certo"
+        # Mesma familia, outro extrator: `_GET_PROCESS_NOME` tambem varria o
+        # comando inteiro. Pre-existente, apontado como nota lateral na 5a
+        # auditoria e corrigido junto por ser a mesma classe.
+        ids = {r.id for r in classify(
+            "Bash",
+            {"command": "Get-Process decoyprocess ; Get-Process chrome | Stop-Process"},
+            "C:/tmp",
+        )}
+        self.assertFalse(
+            any("decoyprocess" in i for i in ids), f"decoy de outro segmento venceu: {ids}"
+        )
+        self.assertTrue(any("chrome" in i for i in ids), f"alvo real perdido: {ids}")
+
     def test_alvo_do_pipe_do_get_process_continua_sendo_achado(self):
         "@spec:AC-003 contrapeso: `Get-Process X | Stop-Process` sem decoy identifica X"
         ids = {r.id for r in classify(

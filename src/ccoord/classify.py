@@ -559,6 +559,15 @@ _VERBO_EM_QUALQUER_POSICAO = re.compile(r"\b" + _VERBOS_KILL + r"\b", re.IGNOREC
 _SEP_ENTRE_COMANDOS = re.compile(r"&&|\|\||[;&\n]")
 
 
+def _limites_do_segmento(command: str, pos: int):
+    """(inicio, fim) do segmento de comando que contem `pos`."""
+    inicio = 0
+    for m in _SEP_ENTRE_COMANDOS.finditer(command, 0, pos):
+        inicio = m.end()
+    m_fim = _SEP_ENTRE_COMANDOS.search(command, pos)
+    return inicio, (m_fim.start() if m_fim else len(command))
+
+
 def _segmento_do_verbo(command: str, pos_verbo: int) -> str:
     """Trecho do comando que contem o verbo, entre separadores de comando.
 
@@ -571,11 +580,7 @@ def _segmento_do_verbo(command: str, pos_verbo: int) -> str:
     (o alvo vem antes do verbo, mas no MESMO segmento) e corta o decoy, que
     por definicao mora em outro comando.
     """
-    inicio = 0
-    for m in _SEP_ENTRE_COMANDOS.finditer(command, 0, pos_verbo):
-        inicio = m.end()
-    m_fim = _SEP_ENTRE_COMANDOS.search(command, pos_verbo)
-    fim = m_fim.start() if m_fim else len(command)
+    inicio, fim = _limites_do_segmento(command, pos_verbo)
     return command[inicio:fim]
 
 
@@ -595,11 +600,17 @@ def _extrair_alvo_kill(command: str) -> Optional[str]:
     """
     m_verbo = _VERBO_EM_QUALQUER_POSICAO.search(command)
     if m_verbo:
-        # 1o depois do verbo; 2o o segmento inteiro (CIM poe o alvo antes do
-        # verbo). NUNCA o comando inteiro -- era por ali que o decoy entrava.
+        # Os DOIS trechos ficam presos ao segmento do verbo. A 1a versao deste
+        # conserto limitou so o fallback e deixou o caminho primario indo ate o
+        # fim da string -- entao o decoy mudou de lado e continuou funcionando
+        # (`taskkill /F /PID 1234 & echo "/im chrome.exe"` devolvia
+        # `browser:chrome.exe`). Pior: o comentario afirmava a protecao que o
+        # caminho primario nao tinha. Achado da 5a auditoria; simetrico exato do
+        # decoy anterior, e a licao e que blindar UM caminho nao blinda a funcao.
+        ini, fim = _limites_do_segmento(command, m_verbo.start())
         trechos = [
-            command[m_verbo.start():],
-            _segmento_do_verbo(command, m_verbo.start()),
+            command[m_verbo.start():fim],  # depois do verbo, dentro do segmento
+            command[ini:fim],              # segmento inteiro (CIM poe o alvo antes)
         ]
     else:
         trechos = [command]
@@ -668,9 +679,14 @@ def _detectar_kill(command: str):
         return []
     alvo = _extrair_alvo_kill(command)
     if alvo is None:
-        m = _GET_PROCESS_NOME.search(command)
+        # Mesma classe do decoy: este extrator tambem varria o comando INTEIRO,
+        # entao `Get-Process decoyprocess ; Get-Process chrome | Stop-Process`
+        # devolvia `decoyprocess`. Prende ao segmento do verbo, como o outro.
+        m_verbo = _VERBO_EM_QUALQUER_POSICAO.search(command)
+        escopo = _segmento_do_verbo(command, m_verbo.start()) if m_verbo else command
+        m = _GET_PROCESS_NOME.search(escopo)
         if m:
-            alvo = m.group(1)
+            alvo = _normaliza_alvo(m.group(1))
     if alvo is None:
         # FAIL-CLOSED. Antes isto virava `process:desconhecido`, um id que nao
         # casa com claim nenhum — ou seja, a forma mais facil de matar processo
