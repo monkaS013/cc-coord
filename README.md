@@ -103,9 +103,13 @@ honesto: quem lê precisa saber onde não confiar.
   própria e não passa pela checagem que impede herdar o alvo do primeiro.
 - **Kill não verbal em sequência** (`.Kill()`, `wmic ... terminate`, `Invoke-CimMethod ... Terminate`):
   quando há mais de um no comando, o segundo não vira recurso.
-- **Texto que cita um kill vira comando aos olhos do gate**: heredoc de mensagem de commit ou
-  documentação com um alvo explícito emite o sentinela de fail-closed e cai em aviso. Custo medido em
-  0,02% dos comandos reais de uma máquina em uso.
+- **Texto que cita um kill vira comando aos olhos do gate**: uma mensagem de commit como
+  `git commit -m "fix: <verbo de kill> <alvo> agora funciona"` emite o sentinela de fail-closed, e a
+  política responde **`deny` com severidade forte — o comando inteiro é bloqueado, não apenas
+  avisado**. É a exceção mais incômoda à regra "deny só para o irreversível" declarada acima, porque
+  aqui nada seria destruído: o comando só *fala* sobre um kill. Custo medido em 0,02% dos comandos
+  reais de uma máquina em uso, quase todos em trabalho sobre o próprio gate. O conserto natural é
+  tratar heredoc e string literal como dado, não como comando.
 
 O caso oposto — um kill herdando o alvo já aprovado de outro e saindo liberado de carona — foi
 fechado; o histórico completo está em `.specs/coordenacao-multissessao/RETOMAR.md`.

@@ -2,8 +2,12 @@
 
 > **Atualização 21/09/2026 (fim do dia) — o furto de alvo está FECHADO. A entrada abaixo, que o
 > declarava aberto, está SUPERADA: leia esta primeiro.**
-> Conserto em `13a1477`, publicado e verificado contra o servidor. 385 testes funcionais, rc=0.
-> `onp-spec verify` 28/28 e `audit --ci` limpo, com AC-028 e T-039.
+> Conserto em `13a1477`, publicado e verificado contra o servidor. **`pytest -q` devolve
+> `1 failed, 385 passed, 231 subtests` e rc=1** — a falha é o gate de p95 (RNF-04), que reprova por
+> carga da máquina e **não executa nenhuma** das funções alteradas (provado por contagem de chamadas
+> em runtime, com controle positivo). O "rc=0" que esta entrada afirmava antes era o rc COM aquele
+> teste deselecionado: número certo, recorte omitido. `onp-spec verify` 28/28 e `audit --ci` limpo
+> (1 aviso pré-existente, glob `src/**/*.js` sem match), ambos com exit 0, com AC-028 e T-039.
 >
 > **O eixo do critério, que custou quatro versões:** não é valor contra posição, é seleção PRÓPRIA do
 > segmento do verbo contra seleção HERDADA de outro segmento. Repetir a seleção em cada verbo é retry
