@@ -709,6 +709,51 @@ class TestBypassesDeKillReproduzidosPelaAuditoria(unittest.TestCase):
                 # checagem de claim, um id a menos custa o processo da peer.
                 del errado
 
+    def test_alvo_dentro_de_segmento_de_leitor_nunca_conta(self):
+        "@spec:AC-003 texto em segmento comandado por leitor nao vira alvo, nem a esquerda do verbo"
+        # 7a auditoria: a busca a esquerda do verbo e o ramo nao-verbal liam o
+        # texto CRU, entao um `echo` anterior sequestrava a identificacao. Nos
+        # dois primeiros casos o resultado e ACUSAR O PROCESSO ERRADO, que
+        # converte o fail-closed em allow silencioso.
+        casos = [
+            # decoy no echo; o verbo nao tem alvo proprio -> tem de dar fail-closed
+            ('echo "/IM chrome.exe"; Stop-Process -Id $badVar -Force',
+             "alvo-nao-identificado", "chrome.exe"),
+            # decoy no echo, MAIS PROXIMO do verbo que a selecao real do CIM
+            ("Get-CimInstance -Filter \"Name='chrome.exe'\" | Select -First 1 | %{ $id=$_.ProcessId }; "
+             "echo \"Name='notepad.exe'\"; Stop-Process -Id $id -Force",
+             "chrome.exe", "notepad.exe"),
+            # ramo NAO VERBAL (Invoke-CimMethod): nao ha verbo para ancorar
+            ("echo \"Name='decoy.exe'\" ; Invoke-CimMethod -Query "
+             "\"select * from Win32_Process where Name='chrome.exe'\" -MethodName Terminate",
+             "chrome.exe", "decoy.exe"),
+        ]
+        for comando, esperado, decoy in casos:
+            with self.subTest(comando=comando[:60]):
+                ids = {r.id for r in classify("Bash", {"command": comando}, "C:/tmp")}
+                self.assertFalse(
+                    any(decoy in i for i in ids),
+                    f"decoy de segmento de leitor venceu -> gate acusa o processo errado: {ids}",
+                )
+                self.assertTrue(
+                    any(esperado in i for i in ids),
+                    f"esperado {esperado!r} no resultado: {ids}",
+                )
+
+    def test_excesso_de_verbos_cai_em_fail_closed_e_nao_em_silencio(self):
+        "@spec:AC-009 comando com mais kills que o teto de ancoras recusa, nao omite"
+        # 7a auditoria: o teto de 8 ancoras (existe para o p95 do caminho quente)
+        # simplesmente DESCARTAVA o 9o e o 10o kill -- eles nao viravam recurso
+        # nenhum, entao nao passavam por `decide()` e saiam allow por omissao.
+        # Teto e limite de custo, nunca licenca para ignorar em silencio.
+        comando = " & ".join(f"taskkill /F /IM proc{i}.exe" for i in range(1, 11))
+        ids = {r.id for r in classify("Bash", {"command": comando}, "C:/tmp")}
+        self.assertIn(
+            "process:alvo-nao-identificado",
+            ids,
+            f"excedeu o teto e nao emitiu o sentinela de fail-closed: {sorted(ids)}",
+        )
+
     def test_alvo_em_segmento_anterior_ao_verbo_continua_sendo_achado(self):
         "@spec:AC-003 `Get-Process X;Stop-Process` acha X, e o decoy mais distante perde"
         # Idioma real de limpeza de chrome orfao do Playwright MCP: o nome vem

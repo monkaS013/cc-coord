@@ -18,6 +18,7 @@ Contexto (ler antes de mexer):
 
 from __future__ import annotations
 
+import functools
 import itertools
 import re
 
@@ -595,6 +596,7 @@ def _ancora_do_verbo(command: str):
 # verbos so aparece em heredoc que ESCREVE teste; oito ancoras cobrem
 # qualquer linha de comando real, e a janela cobre a selecao que alimenta
 # o kill.
+_ALVO_INDETERMINADO = "alvo-nao-identificado"
 _MAX_ANCORAS = 8
 _JANELA_ALVO_A_ESQUERDA = 600
 
@@ -626,12 +628,57 @@ def _segmento_do_verbo(command: str, pos_verbo: int) -> str:
     return command[inicio:fim]
 
 
-def _primeiro_alvo(trecho: str) -> Optional[str]:
-    """Primeiro alvo que os padroes acham NESTE trecho, ja normalizado."""
+@functools.lru_cache(maxsize=64)
+def _mapa_de_segmentos(command: str):
+    """[(inicio, fim, eh_leitor)] de cada segmento, calculado UMA vez por comando.
+
+    Sem isto, `_em_segmento_de_leitor` reprocessava todo o prefixo a cada match
+    e o custo virava quadratico -- o p95 do caminho quente (RNF-04) estourou na
+    primeira versao deste filtro.
+    """
+    mapa, ini = [], 0
+    for m in _SEP_ENTRE_COMANDOS.finditer(command):
+        mapa.append((ini, m.start()))
+        ini = m.end()
+    mapa.append((ini, len(command)))
+    saida = []
+    for a, b in mapa:
+        trecho = command[a:b]
+        tokens = trecho.strip().split()
+        dono = tokens[0].lower().lstrip("\\/.").rsplit("\\", 1)[-1] if tokens else ""
+        eh_leitor = bool(dono) and dono.removesuffix(".exe") in _LEITORES
+        # Leitor que chama shell de dentro (`python -c "...os.system(...)"`) nao
+        # e leitor: e execucao. Mesma guarda que o gatilho ja usava.
+        if eh_leitor and _EXEC_DE_DENTRO.search(trecho):
+            eh_leitor = False
+        saida.append((a, b, eh_leitor))
+    return tuple(saida)
+
+
+def _em_segmento_de_leitor(command: str, pos: int) -> bool:
+    """A posicao esta num segmento comandado por um LEITOR (echo, grep, git...)?
+
+    A 7a auditoria achou tres bypasses com a mesma raiz: a busca de alvo lia o
+    texto CRU, entao `echo "/IM chrome.exe"; Stop-Process -Id $x` e
+    `echo "Name='decoy.exe'" ; Invoke-CimMethod ... Terminate` faziam o gate
+    ACUSAR O PROCESSO ERRADO -- pior que nao identificar, porque um id que
+    ninguem reivindicou vira allow silencioso. O gatilho ja ignorava esses
+    literais; a extracao de alvo, nao. Agora as duas usam o mesmo criterio.
+    """
+    for ini, fim, eh_leitor in _mapa_de_segmentos(command):
+        if ini <= pos < fim:
+            return eh_leitor
+    return False
+
+
+def _primeiro_alvo(command: str, ini: int = 0, fim: Optional[int] = None) -> Optional[str]:
+    """Primeiro alvo dos padroes na faixa, ignorando o que esta em segmento de leitor."""
+    if fim is None:
+        fim = len(command)
     for pat in _KILL_TARGET_PATTERNS:
-        m = pat.search(trecho)
-        if m:
-            return _normaliza_alvo(m.group(1))
+        for m in pat.finditer(command, ini, fim):
+            if not _em_segmento_de_leitor(command, m.start()):
+                return _normaliza_alvo(m.group(1))
     return None
 
 
@@ -739,12 +786,13 @@ def _alvos_de_kill(command: str):
     peer.
     """
     neutro = _neutraliza_literais(command)
-    posicoes = [
-        m.start("ancora")
-        for m in itertools.islice(
-            _KILL_VERBO_EM_POSICAO.finditer(neutro), _MAX_ANCORAS
-        )
-    ]
+    todas = [m.start("ancora") for m in _KILL_VERBO_EM_POSICAO.finditer(neutro)]
+    posicoes = todas[:_MAX_ANCORAS]
+    # Teto e limite de CUSTO, nunca licenca para ignorar em silencio: o que
+    # passa dele vira o sentinela de fail-closed. Antes, o 9o e o 10o kill de um
+    # encadeamento simplesmente nao viravam recurso, logo nao passavam por
+    # `decide()` -- allow por omissao total (7a auditoria).
+    excedeu = len(todas) > _MAX_ANCORAS
     if not posicoes:
         # Gatilho veio de literal que carrega comando (`sed '1e taskkill ...'`),
         # onde o verbo nao esta em posicao de comando no texto neutralizado.
@@ -754,20 +802,23 @@ def _alvos_de_kill(command: str):
         else:
             # Kill NAO VERBAL (`Invoke-CimMethod ... Terminate`, `wmic ... call
             # terminate`, `.Kill()`): nao existe verbo para ancorar, e o alvo
-            # mora num `-Filter "Name='...'"`. Aqui o comando inteiro E o escopo,
-            # e nao ha decoy possivel porque nao ha segmento concorrente com
-            # verbo. Sem este ramo o kill por CIM virava fail-closed.
+            # mora num `-Filter "Name='...'"`. O comando inteiro e o escopo, mas
+            # segmento de leitor continua fora -- o comentario antigo dizia que
+            # aqui nao havia decoy possivel, e a 7a auditoria provou o contrario
+            # com um `echo` antes do `Invoke-CimMethod`.
             alvo = _primeiro_alvo(command) or _alvo_a_esquerda_do_verbo(command, len(command))
             return [alvo] if alvo else []
 
     alvos = []
     for pos in posicoes:
         ini, fim = _limites_do_segmento(command, pos)
-        alvo = _primeiro_alvo(command[pos:fim]) or _primeiro_alvo(command[ini:fim])
+        alvo = _primeiro_alvo(command, pos, fim) or _primeiro_alvo(command, ini, fim)
         if alvo is None:
             alvo = _alvo_a_esquerda_do_verbo(command, pos)
         if alvo and alvo not in alvos:
             alvos.append(alvo)
+    if excedeu:
+        alvos.append(_ALVO_INDETERMINADO)
     return alvos
 
 
@@ -794,12 +845,18 @@ def _alvo_a_esquerda_do_verbo(command: str, pos_verbo: int):
     melhor = None
     for pat in (_GET_PROCESS_NOME,) + _KILL_TARGET_PATTERNS:
         for m in pat.finditer(command, inicio, pos_verbo):
+            # Um `echo` plantado entre a selecao real e o verbo fica MAIS PROXIMO
+            # que ela, entao a regra de proximidade viraria arma sem este filtro.
+            if _em_segmento_de_leitor(command, m.start()):
+                continue
             if melhor is None or m.start() > melhor.start():
                 melhor = m
     return _normaliza_alvo(melhor.group(1)) if melhor else None
 
 
 def _recursos_do_alvo(alvo: str):
+    if alvo == _ALVO_INDETERMINADO:
+        return [Resource(kind="process", id=f"process:{_ALVO_INDETERMINADO}", action="kill")]
     alvo_lower = alvo.lower()
     curingas = _candidatos_wildcard(alvo_lower)
     if curingas:
