@@ -93,11 +93,37 @@ também não é o mesmo que peer trabalhando: processo recente quer dizer em uso
 ninguém conseguindo abrir quer dizer órfão. Matar processo alheio continua sendo decisão de quem está
 na frente do computador, não do agente.
 
+### O que o gate de kill ainda não cobre
+
+Cinco rodadas de auditoria adversarial sobre a identificação de alvo deixaram três buracos conhecidos
+em aberto. Estão aqui porque um gate de segurança que esconde os próprios limites é pior que um gate
+honesto: quem lê precisa saber onde não confiar.
+
+- **Dois verbos de kill no mesmo segmento**, ligados por pipe: o segundo é identificado pela seleção
+  própria e não passa pela checagem que impede herdar o alvo do primeiro.
+- **Kill não verbal em sequência** (`.Kill()`, `wmic ... terminate`, `Invoke-CimMethod ... Terminate`):
+  quando há mais de um no comando, o segundo não vira recurso.
+- **Texto que cita um kill vira comando aos olhos do gate**: heredoc de mensagem de commit ou
+  documentação com um alvo explícito emite o sentinela de fail-closed e cai em aviso. Custo medido em
+  0,02% dos comandos reais de uma máquina em uso.
+
+O caso oposto — um kill herdando o alvo já aprovado de outro e saindo liberado de carona — foi
+fechado; o histórico completo está em `.specs/coordenacao-multissessao/RETOMAR.md`.
+
 ## Testes
 
 ```
 python -m pytest -q
 ```
 
-366 testes e 171 subtests. O teste de p95 do caminho quente é sensível a carga da máquina: se ele
-falhar com outros processos pesados rodando, rode isolado antes de concluir que houve regressão.
+385 testes e 231 subtests. O teste de p95 do caminho quente é sensível a carga da máquina, e ele
+reporta junto o piso do interpretador para você distinguir ambiente de código.
+
+Se ele falhar, **rodar isolado não basta**: quando a carga é permanente, N rodadas repetem o mesmo
+viés e "falhou 3 de 3" vira falsa confirmação. Duas checagens que de fato discriminam, nesta ordem:
+
+1. **Alcance** — o cenário do teste chega a executar o código que você mudou? Instrumente as funções
+   alteradas com um contador, e inclua um controle positivo (um cenário que *deve* acioná-las). Zero
+   chamadas encerra a questão: a reprovação não pode vir da sua mudança.
+2. **Controle na mesma carga** — instale a versão anterior e meça no mesmo instante. Se ela reprovar
+   igual, é ambiente.

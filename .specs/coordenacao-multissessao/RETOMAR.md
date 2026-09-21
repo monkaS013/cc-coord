@@ -1,6 +1,39 @@
 # Como retomar a feature cc-coord
 
-> **Atualização 21/09/2026 — 9ª auditoria: 1 achado ALTA ABERTO (furto de alvo) e 1 débito declarado.**
+> **Atualização 21/09/2026 (fim do dia) — o furto de alvo está FECHADO. A entrada abaixo, que o
+> declarava aberto, está SUPERADA: leia esta primeiro.**
+> Conserto em `13a1477`, publicado e verificado contra o servidor. 385 testes funcionais, rc=0.
+> `onp-spec verify` 28/28 e `audit --ci` limpo, com AC-028 e T-039.
+>
+> **O eixo do critério, que custou quatro versões:** não é valor contra posição, é seleção PRÓPRIA do
+> segmento do verbo contra seleção HERDADA de outro segmento. Repetir a seleção em cada verbo é retry
+> legítimo; reaproveitar a do vizinho é carona. Quatro versões caíram antes, todas com a suíte verde,
+> e cada uma virou teste: `continue` no laço promovia o decoy mais distante; recusa por valor sem a
+> tentativa nova recusava retry; recusa por posição reabria o furto com ~12 caracteres plantados; e a
+> tentativa nova, sem o teto de distância que a irmã sempre teve, deixava decoy distante mascarar o
+> fail-closed. **Cinco rodadas de auditoria adversarial: as quatro primeiras acharam um defeito cada,
+> a quinta não achou nenhum em 16 comandos.**
+>
+> **Diferencial sobre 29.582 comandos reais:** 3 divergências (0,01%), ZERO perda de id, 0 exceções.
+> Foi esse número que derrubou duas das quatro versões — a suíte aprovava as duas.
+>
+> **O QUE CONTINUA ABERTO, e é pré-existente (não foi introduzido nem fechado por este trabalho):**
+> 1. **Duas âncoras no MESMO segmento**, ligadas por pipe: a segunda resolve pela seleção própria e
+>    nunca passa pela recusa por valor. Fechar isso é extensão de feature — a tentativa 3 teria de
+>    receber e checar `alvos_consumidos` também.
+> 2. **Caminho NÃO VERBAL em sequência** (`.Kill()`, `wmic ... terminate`, `Invoke-CimMethod`): o
+>    segundo kill se perde. Esse ramo nunca passa pelo laço por âncora.
+> 3. **Heredoc tratado como comando, não como dado** (débito declarado, custo medido em 0,02%):
+>    mensagem de commit ou documentação que cite um kill com alvo explícito emite o sentinela.
+> 4. **Gate de p95 do RNF-04 reprova nesta máquina sob carga** — e isso é do gate, não do conserto:
+>    provado por contagem de chamadas em runtime, o `Edit` que o gate exercita **não executa nenhuma**
+>    das funções alteradas (controle positivo: um `Bash` com kill executa as quatro). O HEAD reprova
+>    igual. Falta decidir se o gate ganha tolerância a ambiente ou se passa a medir sem subprocesso.
+>
+> Scripts de verificação e o corpus ficam em `~/dev/cc-coord-verif/` (fora do repo de propósito: o
+> corpus tem caminhos de usuário e este repositório é público).
+
+> **[SUPERADA — mantida como registro] Atualização 21/09/2026 — 9ª auditoria: 1 achado ALTA (furto de alvo) e 1 débito declarado.**
 > HEAD `bd2e963`, **5 commits locais ainda SEM push**. 380 testes, 0 falhas. O push está segurado por
 > decisão do Vinicius enquanto a curva de regressão não fechar — e ela **não fechou**.
 >
