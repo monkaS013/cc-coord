@@ -116,8 +116,10 @@ fechado; o histórico completo está em `.specs/coordenacao-multissessao/RETOMAR
 python -m pytest -q
 ```
 
-385 testes e 231 subtests. O teste de p95 do caminho quente é sensível a carga da máquina, e ele
-reporta junto o piso do interpretador para você distinguir ambiente de código.
+386 testes e 231 subtests. **Numa máquina carregada você provavelmente verá `1 failed, 385 passed`**:
+o que reprova é o gate de p95 do caminho quente, sensível a carga. Ele reporta junto o piso do
+interpretador justamente para você distinguir ambiente de código — se o piso passa de 45 ms, a
+máquina está ocupada e o número não diz nada sobre o código.
 
 Se ele falhar, **rodar isolado não basta**: quando a carga é permanente, N rodadas repetem o mesmo
 viés e "falhou 3 de 3" vira falsa confirmação. Duas checagens que de fato discriminam, nesta ordem:
