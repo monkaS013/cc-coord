@@ -4,8 +4,12 @@
 > declarava aberto, está SUPERADA: leia esta primeiro.**
 > Conserto em `13a1477`, publicado e verificado contra o servidor. **`pytest -q` devolve
 > `1 failed, 385 passed, 231 subtests` e rc=1** — a falha é o gate de p95 (RNF-04), que reprova por
-> carga da máquina e **não executa nenhuma** das funções alteradas (provado por contagem de chamadas
-> em runtime, com controle positivo). O "rc=0" que esta entrada afirmava antes era o rc COM aquele
+> carga da máquina e **não executa nenhuma** das funções alteradas. Duas provas: contagem de chamadas
+> em runtime com controle positivo (zero num `Edit`, quatro num `Bash` com kill) — feita sobre
+> `classify()` chamada diretamente, porque o teste roda o hook como SUBPROCESSO e instrumentar o
+> processo do teste não o alcançaria —, e a estrutural, que é mais forte: `classify()` despacha por
+> `tool_name`, e `_detectar_kill` só é chamada dentro de `_classify_bash`, nunca em `_classify_edit`.
+> Os dois caminhos são disjuntos no código, não apenas neste cenário. O "rc=0" que esta entrada afirmava antes era o rc COM aquele
 > teste deselecionado: número certo, recorte omitido. `onp-spec verify` 28/28 e `audit --ci` limpo
 > (1 aviso pré-existente, glob `src/**/*.js` sem match), ambos com exit 0, com AC-028 e T-039.
 >
