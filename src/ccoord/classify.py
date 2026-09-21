@@ -18,6 +18,7 @@ Contexto (ler antes de mexer):
 
 from __future__ import annotations
 
+import itertools
 import re
 
 from ccoord.paths import resolver_nome_curto as _resolver_nome_curto
@@ -352,12 +353,13 @@ _KILL_VERBO_EM_POSICAO = re.compile(
     # colado no verbo, e `xargs -I{}` virava bypass.
     r"(?:" + _PREFIXOS_NEUTROS + r"(?:[-/]\S+\s+|\{\}\s+)*)*"
     r"(?:\w+=\S*\s+)*"
+    r"(?P<ancora>"
     # Caminho ate o executavel: `/c/Windows/System32/taskkill.exe //PID 1` e a
     # forma que o proprio dono usa no Git Bash, e `C:\Windows\System32\...`
     # aparece no PowerShell. Sem isto o verbo vem depois de `/` ou `\`, que nao
     # e separador -- falso negativo. Achado pelo diferencial no corpus real.
     r"(?:[A-Za-z]:)?(?:[\w.~$-]*[/\\])*"
-    + _VERBOS_KILL + r"\b",
+    + _VERBOS_KILL + r"\b)",
     re.IGNORECASE,
 )
 
@@ -554,8 +556,48 @@ def _normaliza_alvo(bruto: str) -> Optional[str]:
 
 _VERBO_EM_QUALQUER_POSICAO = re.compile(r"\b" + _VERBOS_KILL + r"\b", re.IGNORECASE)
 
+
+class _Ancora:
+    """Posicao do verbo que ancora a extracao do alvo. Só `start()` importa."""
+
+    __slots__ = ("_pos",)
+
+    def __init__(self, pos: int):
+        self._pos = pos
+
+    def start(self) -> int:
+        return self._pos
+
+
+def _ancora_do_verbo(command: str):
+    """Onde comeca o verbo que MANDA no comando -- nao a primeira palavra parecida.
+
+    A 6a auditoria achou o defeito que eu mesmo criei ao prender a extracao ao
+    segmento: a ancora era a primeira ocorrencia da palavra em QUALQUER lugar,
+    entao `echo "kill 99 please"; taskkill /F /IM chrome.exe` ancorava no texto
+    decorativo. O segmento virava o do `echo`, o taskkill real sumia, e o gate
+    devolvia `process:99` -- id que nao casa com claim nenhum, ou seja LIBERA o
+    kill do chrome de uma peer. Ancorar no verbo em POSICAO DE COMANDO, sobre o
+    texto com os literais de leitor neutralizados, e o que distingue os dois.
+
+    O fallback para "qualquer posicao" cobre o caso em que o gatilho veio de um
+    literal que carrega comando (`sed '1e taskkill ...'`), onde o verbo
+    legitimamente nao esta em posicao de comando no texto neutralizado.
+    """
+    m = _KILL_VERBO_EM_POSICAO.search(_neutraliza_literais(command))
+    if m:
+        return _Ancora(m.start("ancora"))
+    return _VERBO_EM_QUALQUER_POSICAO.search(command)
+
 # Separadores de COMANDO. O pipe simples NAO entra: `Get-Process chrome |
 # Stop-Process` e um comando so, e o alvo mora do lado esquerdo do pipe.
+# Tetos do caminho quente (RNF-04, p95 < 150 ms). Comando com dezenas de
+# verbos so aparece em heredoc que ESCREVE teste; oito ancoras cobrem
+# qualquer linha de comando real, e a janela cobre a selecao que alimenta
+# o kill.
+_MAX_ANCORAS = 8
+_JANELA_ALVO_A_ESQUERDA = 600
+
 _SEP_ENTRE_COMANDOS = re.compile(r"&&|\|\||[;&\n]")
 
 
@@ -584,6 +626,15 @@ def _segmento_do_verbo(command: str, pos_verbo: int) -> str:
     return command[inicio:fim]
 
 
+def _primeiro_alvo(trecho: str) -> Optional[str]:
+    """Primeiro alvo que os padroes acham NESTE trecho, ja normalizado."""
+    for pat in _KILL_TARGET_PATTERNS:
+        m = pat.search(trecho)
+        if m:
+            return _normaliza_alvo(m.group(1))
+    return None
+
+
 def _extrair_alvo_kill(command: str) -> Optional[str]:
     """Alvo do kill, preferindo o que vem DEPOIS do verbo.
 
@@ -598,7 +649,7 @@ def _extrair_alvo_kill(command: str) -> Optional[str]:
     o alvo vem ANTES do verbo, e cortar no verbo viraria falso negativo. Tenta
     depois do verbo; so entao o texto todo.
     """
-    m_verbo = _VERBO_EM_QUALQUER_POSICAO.search(command)
+    m_verbo = _ancora_do_verbo(command)
     if m_verbo:
         # Os DOIS trechos ficam presos ao segmento do verbo. A 1a versao deste
         # conserto limitou so o fallback e deixou o caminho primario indo ate o
@@ -674,39 +725,112 @@ _GET_PROCESS_NOME = re.compile(
 )
 
 
-def _detectar_kill(command: str):
-    if not _tem_gatilho_kill(command):
-        return []
-    alvo = _extrair_alvo_kill(command)
-    if alvo is None:
-        # Mesma classe do decoy: este extrator tambem varria o comando INTEIRO,
-        # entao `Get-Process decoyprocess ; Get-Process chrome | Stop-Process`
-        # devolvia `decoyprocess`. Prende ao segmento do verbo, como o outro.
-        m_verbo = _VERBO_EM_QUALQUER_POSICAO.search(command)
-        escopo = _segmento_do_verbo(command, m_verbo.start()) if m_verbo else command
-        m = _GET_PROCESS_NOME.search(escopo)
-        if m:
-            alvo = _normaliza_alvo(m.group(1))
-    if alvo is None:
-        # FAIL-CLOSED. Antes isto virava `process:desconhecido`, um id que nao
-        # casa com claim nenhum — ou seja, a forma mais facil de matar processo
-        # de peer viva era escrever o comando de um jeito que o parser nao
-        # entendesse. Kill e irreversivel: quando nao da para dizer O QUE morre,
-        # a resposta honesta e recusar e mandar perguntar, nao liberar por
-        # ignorancia. O id sentinela e reconhecido pela politica.
-        return [Resource(kind="process", id="process:alvo-nao-identificado", action="kill")]
-    alvo_lower = alvo.lower()
+def _alvos_de_kill(command: str):
+    """TODOS os alvos do comando, um por verbo em posicao de comando.
 
-    candidatos = _candidatos_wildcard(alvo_lower)
-    if candidatos:
+    Devolver um alvo so era a raiz de tres defeitos diferentes:
+      - `taskkill /F /IM a.exe & taskkill /F /IM b.exe` checava so o `a.exe`,
+        e o `b.exe` morria sem passar por claim nenhum (4a auditoria);
+      - `taskkill /F /IM a.exe /IM b.exe`, idem;
+      - `echo "kill 99 please"; taskkill /F /IM chrome.exe` ancorava no texto
+        decorativo e o chrome real ficava INVISIVEL (6a auditoria).
+    Coletar todos resolve os tres de uma vez e erra para o lado seguro: um alvo
+    a mais custa uma checagem de claim, um alvo a menos custa o processo de uma
+    peer.
+    """
+    neutro = _neutraliza_literais(command)
+    posicoes = [
+        m.start("ancora")
+        for m in itertools.islice(
+            _KILL_VERBO_EM_POSICAO.finditer(neutro), _MAX_ANCORAS
+        )
+    ]
+    if not posicoes:
+        # Gatilho veio de literal que carrega comando (`sed '1e taskkill ...'`),
+        # onde o verbo nao esta em posicao de comando no texto neutralizado.
+        m = _VERBO_EM_QUALQUER_POSICAO.search(command)
+        if m:
+            posicoes = [m.start()]
+        else:
+            # Kill NAO VERBAL (`Invoke-CimMethod ... Terminate`, `wmic ... call
+            # terminate`, `.Kill()`): nao existe verbo para ancorar, e o alvo
+            # mora num `-Filter "Name='...'"`. Aqui o comando inteiro E o escopo,
+            # e nao ha decoy possivel porque nao ha segmento concorrente com
+            # verbo. Sem este ramo o kill por CIM virava fail-closed.
+            alvo = _primeiro_alvo(command) or _alvo_a_esquerda_do_verbo(command, len(command))
+            return [alvo] if alvo else []
+
+    alvos = []
+    for pos in posicoes:
+        ini, fim = _limites_do_segmento(command, pos)
+        alvo = _primeiro_alvo(command[pos:fim]) or _primeiro_alvo(command[ini:fim])
+        if alvo is None:
+            alvo = _alvo_a_esquerda_do_verbo(command, pos)
+        if alvo and alvo not in alvos:
+            alvos.append(alvo)
+    return alvos
+
+
+def _alvo_a_esquerda_do_verbo(command: str, pos_verbo: int):
+    """Alvo declarado ANTES do verbo, pela ocorrencia mais proxima dele.
+
+    O idioma real de limpeza do chrome orfao do Playwright separa a selecao do
+    kill por `;`:
+
+        $p = Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" |
+             Where-Object { ... }; $p | ForEach-Object { Stop-Process -Id $_.ProcessId }
+
+    Prender a busca ao segmento do verbo quebrava isso (virava deny) -- medido
+    em 6 comandos genuinos do historico desta maquina. Varrer o texto inteiro
+    reabria o decoy. A regra que concilia os dois e a PROXIMIDADE: vale o alvo
+    mais proximo a esquerda do verbo, porque decoy plantado num `echo` anterior
+    fica sempre mais longe que a selecao legitima que alimenta o kill.
+    """
+    # Janela, nao o prefixo inteiro: a selecao que alimenta o kill fica a
+    # algumas centenas de caracteres dele, e varrer 24 KB de heredoc com 9
+    # padroes por verbo estourou o p95 do caminho quente (RNF-04) -- medido em
+    # 220 ms contra o teto de 150.
+    inicio = max(0, pos_verbo - _JANELA_ALVO_A_ESQUERDA)
+    melhor = None
+    for pat in (_GET_PROCESS_NOME,) + _KILL_TARGET_PATTERNS:
+        for m in pat.finditer(command, inicio, pos_verbo):
+            if melhor is None or m.start() > melhor.start():
+                melhor = m
+    return _normaliza_alvo(melhor.group(1)) if melhor else None
+
+
+def _recursos_do_alvo(alvo: str):
+    alvo_lower = alvo.lower()
+    curingas = _candidatos_wildcard(alvo_lower)
+    if curingas:
         return [
             Resource(kind="browser", id=f"browser:{nome}", action="kill")
-            for nome in candidatos
+            for nome in curingas
         ]
-
     if any(nome in alvo_lower for nome in _BROWSER_NAMES):
         return [Resource(kind="browser", id=f"browser:{alvo_lower}", action="kill")]
     return [Resource(kind="process", id=f"process:{alvo_lower}", action="kill")]
+
+
+def _detectar_kill(command: str):
+    if not _tem_gatilho_kill(command):
+        return []
+    alvos = _alvos_de_kill(command)
+    if alvos:
+        recursos, vistos = [], set()
+        for alvo in alvos:
+            for r in _recursos_do_alvo(alvo):
+                if r.id not in vistos:
+                    vistos.add(r.id)
+                    recursos.append(r)
+        return recursos
+    # FAIL-CLOSED. Antes isto virava `process:desconhecido`, um id que nao
+    # casa com claim nenhum — ou seja, a forma mais facil de matar processo
+    # de peer viva era escrever o comando de um jeito que o parser nao
+    # entendesse. Kill e irreversivel: quando nao da para dizer O QUE morre,
+    # a resposta honesta e recusar e mandar perguntar, nao liberar por
+    # ignorancia. O id sentinela e reconhecido pela politica.
+    return [Resource(kind="process", id="process:alvo-nao-identificado", action="kill")]
 
 
 _GIT_TRIGGER = re.compile(r"\bgit\b")

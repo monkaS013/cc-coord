@@ -682,6 +682,44 @@ class TestBypassesDeKillReproduzidosPelaAuditoria(unittest.TestCase):
                     f"o alvo REAL tem de ser identificado, senao so troquei um erro por outro: {ids}",
                 )
 
+    def test_verbo_decorativo_em_outro_segmento_nao_vira_a_ancora(self):
+        "@spec:AC-003 a palavra dentro de um echo nao ancora o segmento do kill real"
+        # 6a auditoria, e este foi INTRODUZIDO por mim: ao prender a extracao ao
+        # segmento do verbo, a ancora passou a ser a PRIMEIRA ocorrencia da
+        # palavra em qualquer lugar -- inclusive dentro de `echo "kill ..."`.
+        # O segmento passou a ser o do echo, e o comando real ficou invisivel.
+        # Os dois primeiros casos sao os graves: devolvem alvo ERRADO, entao o
+        # gate checa o claim de um processo que ninguem vai matar e LIBERA.
+        casos = [
+            ('echo "kill 99 please"; taskkill /F /IM chrome.exe', "chrome.exe", "99"),
+            ('echo "note kill 4321 later"; Stop-Process -Id 1234 -Force', "1234", "4321"),
+            ('echo "---kill stray edge---"; taskkill //IM msedge.exe //F', "msedge.exe", None),
+        ]
+        for comando, real, errado in casos:
+            with self.subTest(comando=comando):
+                ids = {r.id for r in classify("Bash", {"command": comando}, "C:/tmp")}
+                self.assertTrue(
+                    any(real in i for i in ids),
+                    f"o alvo REAL sumiu; a ancora caiu no verbo decorativo: {ids}",
+                )
+                # O alvo do texto decorativo PODE aparecer junto: hoje todos os
+                # verbos em posicao de comando viram alvo, e `kill 99` dentro de
+                # um echo e indistinguivel de comando sem executar o shell. O
+                # que nao pode e o alvo REAL sumir -- um id a mais custa uma
+                # checagem de claim, um id a menos custa o processo da peer.
+                del errado
+
+    def test_alvo_em_segmento_anterior_ao_verbo_continua_sendo_achado(self):
+        "@spec:AC-003 `Get-Process X;Stop-Process` acha X, e o decoy mais distante perde"
+        # Idioma real de limpeza de chrome orfao do Playwright MCP: o nome vem
+        # num comando anterior, separado por `;`. Prender ao segmento tinha
+        # quebrado isso (virava deny). A regra que concilia com o decoy: vale a
+        # ocorrencia MAIS PROXIMA a esquerda do verbo.
+        ids = {r.id for r in classify(
+            "Bash", {"command": "Get-Process chrome;Stop-Process"}, "C:/tmp"
+        )}
+        self.assertTrue(any("chrome" in i for i in ids), f"alvo legitimo perdido: {ids}")
+
     def test_get_process_no_pipe_tambem_respeita_o_segmento(self):
         "@spec:AC-003 o nome vindo de `Get-Process X | Stop-Process` sai do segmento certo"
         # Mesma familia, outro extrator: `_GET_PROCESS_NOME` tambem varria o
