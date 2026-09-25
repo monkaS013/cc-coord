@@ -133,3 +133,21 @@ viés e "falhou 3 de 3" vira falsa confirmação. Duas checagens que de fato dis
    chamadas encerra a questão: a reprovação não pode vir da sua mudança.
 2. **Controle na mesma carga** — instale a versão anterior e meça no mesmo instante. Se ela reprovar
    igual, é ambiente.
+
+### Como a suíte cresceu
+
+Contagem de funções de teste em `tests/` nos marcos do histórico do git, da primeira versão ao último
+commit que mexeu na suíte (o exemplo de docstring em `tests/run_tap.py` fica de fora):
+
+| Data | Commit | Testes | O que entrou |
+|---|---|---|---|
+| 12/09 | `daa5f35` | 223 | primeira versão |
+| 12/09 | `29c5066` | 263 | defeitos achados no ensaio com duas sessões reais |
+| 13/09 | `09069f1` | 287 | posse do perfil de browser |
+| 14/09 | `38a5e77` | 300 | quinta auditoria, ramo de kill e escrita |
+| 17/09 | `0406832` | 362 | cinco dias de uso real, encoding do hook, hook de início de turno |
+| 18/09 | `8b2dfff` | 366 | fim do ciclo de auditorias |
+| 21/09 | `cd4d8bf` | 386 | kill com vários alvos no mesmo comando ("furto de alvo") |
+
+Dos 25 commits que mexeram em `tests/` depois da primeira versão, 20 são conserto ou teste novo e 4 são
+feature. Oito deles dizem na mensagem que o defeito apareceu no ensaio, no log de uso ou em auditoria.
